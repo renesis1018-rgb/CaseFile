@@ -1,0 +1,169 @@
+import SwiftUI
+import CoreData
+
+struct SurgeryDetailView: View {
+    @ObservedObject var surgery: Surgery
+    @State private var selectedTab = 0
+    
+    var body: some View {
+        TabView(selection: $selectedTab) {
+            // 手術情報タブ
+            SurgeryInfoTab(surgery: surgery)
+                .tabItem {
+                    Label("手術情報", systemImage: "info.circle")
+                }
+                .tag(0)
+            
+            // 写真タブ
+            PhotoManagementView(surgery: surgery)
+                .tabItem {
+                    Label("写真", systemImage: "photo")
+                }
+                .tag(1)
+            
+            // 経過タブ
+            FollowUpTab(surgery: surgery)
+                .tabItem {
+                    Label("経過", systemImage: "chart.line.uptrend.xyaxis")
+                }
+                .tag(2)
+        }
+        .navigationTitle("手術詳細")
+    }
+}
+
+// 手術情報タブ
+struct SurgeryInfoTab: View {
+    @ObservedObject var surgery: Surgery
+    @State private var showEditSheet = false
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                GroupBox(label: Text("基本情報").font(.headline)) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        InfoRow(label: "術式カテゴリ", value: surgery.surgeryCategory ?? "不明")
+                        InfoRow(label: "術式", value: surgery.surgeryType ?? "不明")
+                        InfoRow(label: "手術日", value: formattedDate(surgery.surgeryDate ?? Date()))
+                    }
+                    .padding(8)
+                }
+                
+                // 脂肪豊胸の場合のみ表示
+                if surgery.surgeryType == "脂肪豊胸" {
+                    GroupBox(label: Text("脂肪豊胸データ").font(.headline)) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                if surgery.vaserUsed {
+                                    Label("VASER使用", systemImage: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                }
+                                if surgery.aquicellUsed {
+                                    Label("Aquicell使用", systemImage: "checkmark.circle.fill")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                            
+                            if let donorSite = surgery.donorSite {
+                                InfoRow(label: "採取部位", value: donorSite)
+                            }
+                            
+                            if let rightVol = surgery.rightBreastVolume {
+                                InfoRow(label: "右胸注入量", value: "\(rightVol) cc")
+                            }
+                            
+                            if let leftVol = surgery.leftBreastVolume {
+                                InfoRow(label: "左胸注入量", value: "\(leftVol) cc")
+                            }
+                            
+                            if surgery.preOpVectra {
+                                Label("術前Vectra撮影済み", systemImage: "checkmark.circle")
+                            }
+                            
+                            if let skinLaxity = surgery.skinLaxity {
+                                InfoRow(label: "皮膚弛緩度", value: skinLaxity)
+                            }
+                        }
+                        .padding(8)
+                    }
+                }
+                
+                if let notes = surgery.notes, !notes.isEmpty {
+                    GroupBox(label: Text("備考").font(.headline)) {
+                        Text(notes)
+                            .padding(8)
+                    }
+                }
+                
+                Button(action: { showEditSheet = true }) {
+                    HStack {
+                        Image(systemName: "pencil")
+                        Text("編集")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top)
+            }
+            .padding()
+        }
+        .sheet(isPresented: $showEditSheet) {
+            EditSurgeryView(surgery: surgery)
+        }
+    }
+    
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
+    }
+}
+
+// 経過タブ
+struct FollowUpTab: View {
+    @ObservedObject var surgery: Surgery
+    @State private var showAddFollowUp = false
+    
+    var followUps: [FollowUp] {
+        (surgery.followUps?.allObjects as? [FollowUp] ?? [])
+            .sorted { ($0.measurementDate ?? Date()) < ($1.measurementDate ?? Date()) }
+    }
+    
+    var body: some View {
+        VStack {
+            if followUps.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 60))
+                        .foregroundColor(.gray)
+                    Text("まだ経過記録がありません")
+                        .foregroundColor(.secondary)
+                    Button(action: { showAddFollowUp = true }) {
+                        Label("経過記録を追加", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(followUps, id: \.id) { followUp in
+                            FollowUpCard(followUp: followUp)
+                        }
+                    }
+                    .padding()
+                }
+                
+                Button(action: { showAddFollowUp = true }) {
+                    Label("経過記録を追加", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .padding()
+            }
+        }
+        .sheet(isPresented: $showAddFollowUp) {
+            AddFollowUpView(surgery: surgery)
+        }
+    }
+}

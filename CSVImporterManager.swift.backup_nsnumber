@@ -1,0 +1,425 @@
+import Foundation
+import CoreData
+import Combine
+
+// MARK: - Import Step
+enum ImportStep: Int, CaseIterable {
+    case patient = 1
+    case surgery = 2
+    case labData = 3
+    case followUp = 4
+    
+    var title: String {
+        switch self {
+        case .patient: return "患者基本情報"
+        case .surgery: return "手術情報"
+        case .labData: return "血液検査"
+        case .followUp: return "経過情報"
+        }
+    }
+    
+    var fileName: String {
+        switch self {
+        case .patient: return "01_患者基本情報.csv"
+        case .surgery: return "03_手術情報.csv"
+        case .labData: return "02_血液検査.csv"
+        case .followUp: return "04_経過情報.csv"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .patient: return "person.fill"
+        case .surgery: return "stethoscope"
+        case .labData: return "cross.vial"
+        case .followUp: return "chart.line.uptrend.xyaxis"
+        }
+    }
+}
+
+// MARK: - Import Error
+struct ImportError: Identifiable {
+    let id = UUID()
+    let step: ImportStep
+    let row: Int
+    let message: String
+}
+
+// MARK: - CSV Importer Manager
+@MainActor
+class CSVImporterManager: ObservableObject {
+    @Published var currentStep: ImportStep?
+    @Published var progress: Double = 0.0
+    @Published var status: String = "待機中"
+    @Published var isImporting: Bool = false
+    @Published var errors: [ImportError] = []
+    
+    @Published var patientCount: Int = 0
+    @Published var surgeryCount: Int = 0
+    @Published var labDataCount: Int = 0
+    @Published var followUpCount: Int = 0
+    
+    @Published var completedSteps: Set<ImportStep> = []
+    
+    private let context: NSManagedObjectContext
+    
+    init(context: NSManagedObjectContext) {
+        self.context = context
+    }
+    
+    // MARK: - Import Single CSV
+    func importCSV(step: ImportStep, from url: URL) async throws {
+        isImporting = true
+        currentStep = step
+        status = "\(step.title)をインポート中..."
+        
+        // CSVファイル読み込み
+        let csvString = try String(contentsOf: url, encoding: .utf8)
+        let lines = csvString.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        
+        guard lines.count > 1 else {
+            throw NSError(domain: "CSVImporter", code: 1,
+                         userInfo: [NSLocalizedDescriptionKey: "CSVファイルが空です"])
+        }
+        
+        let totalRows = lines.count - 1
+        let headers = parseCSVLine(lines[0])
+        
+        print("📋 \(step.title): \(totalRows)行のデータを処理")
+        
+        // ステップごとに処理
+        for (index, line) in lines.dropFirst().enumerated() {
+            progress = Double(index + 1) / Double(totalRows)
+            
+            let values = parseCSVLine(line)
+            
+            do {
+                switch step {
+                case .patient:
+                    try await importPatientRow(headers: headers, values: values, rowNumber: index + 2)
+                    patientCount += 1
+                case .surgery:
+                    try await importSurgeryRow(headers: headers, values: values, rowNumber: index + 2)
+                    surgeryCount += 1
+                case .labData:
+                    try await importLabDataRow(headers: headers, values: values, rowNumber: index + 2)
+                    labDataCount += 1
+                case .followUp:
+                    try await importFollowUpRow(headers: headers, values: values, rowNumber: index + 2)
+                    followUpCount += 1
+                }
+            } catch {
+                errors.append(ImportError(
+                    step: step,
+                    row: index + 2,
+                    message: error.localizedDescription
+                ))
+            }
+            
+            // 定期保存
+            if (index + 1) % 50 == 0 {
+                try context.save()
+            }
+        }
+        
+        // 最終保存
+        try context.save()
+        
+        completedSteps.insert(step)
+        progress = 1.0
+        status = "✅ \(step.title)のインポート完了"
+        isImporting = false
+    }
+    
+    // MARK: - Parse CSV Line
+    private func parseCSVLine(_ line: String) -> [String] {
+        var result: [String] = []
+        var currentField = ""
+        var insideQuotes = false
+        
+        for char in line {
+            if char == "\"" {
+                insideQuotes.toggle()
+            } else if char == "," && !insideQuotes {
+                result.append(currentField.trimmingCharacters(in: .whitespaces))
+                currentField = ""
+            } else {
+                currentField.append(char)
+            }
+        }
+        
+        result.append(currentField.trimmingCharacters(in: .whitespaces))
+        return result
+    }
+    
+    // MARK: - Import Patient Row
+    private func importPatientRow(headers: [String], values: [String], rowNumber: Int) async throws {
+        var data: [String: String] = [:]
+        for (index, header) in headers.enumerated() {
+            if index < values.count {
+                data[header] = values[index]
+            }
+        }
+        
+        guard let opeDateStr = data["Ope日"], !opeDateStr.isEmpty,
+              let patientIdStr = data["患者ID"], !patientIdStr.isEmpty else {
+            throw NSError(domain: "CSVImporter", code: 2,
+                         userInfo: [NSLocalizedDescriptionKey: "Ope日または患者IDが空です"])
+        }
+        
+        // 日付変換
+        let opeDate = try parseDate(opeDateStr)
+        
+        // 既存Patient検索
+        let fetchRequest: NSFetchRequest<Patient> = Patient.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "patientId == %@", patientIdStr)
+        
+        let patient: Patient
+        if let existingPatient = try context.fetch(fetchRequest).first {
+            patient = existingPatient
+        } else {
+            patient = Patient(context: context)
+            patient.id = UUID()
+            patient.patientId = patientIdStr
+            patient.registeredDate = opeDate
+        }
+        
+        // データ設定
+        patient.age = Int16(data["年齢"] ?? "0") ?? 0
+        patient.gender = "女性"
+        
+        if let heightStr = data["身長(m)"], let height = Double(heightStr) {
+            patient.heightCm = height * 100
+        }
+        
+        if let bwStr = data["体重(kg)"], let bw = Double(bwStr) {
+            patient.bodyWeightKg = bw
+        }
+        
+        if let bmiStr = data["BMI"], let bmi = Double(bmiStr) {
+            patient.bmi = bmi
+        }
+        
+        patient.smokingStatus = data["喫煙歴"]
+        patient.breastFeedingHistory = data["授乳歴"]
+    }
+    
+    // MARK: - Import Surgery Row
+    private func importSurgeryRow(headers: [String], values: [String], rowNumber: Int) async throws {
+        var data: [String: String] = [:]
+        for (index, header) in headers.enumerated() {
+            if index < values.count {
+                data[header] = values[index]
+            }
+        }
+        
+        guard let opeDateStr = data["Ope日"], !opeDateStr.isEmpty,
+              let patientIdStr = data["患者ID"], !patientIdStr.isEmpty else {
+            throw NSError(domain: "CSVImporter", code: 3,
+                         userInfo: [NSLocalizedDescriptionKey: "Ope日または患者IDが空です"])
+        }
+        
+        let opeDate = try parseDate(opeDateStr)
+        
+        // Patient検索
+        let patientFetch: NSFetchRequest<Patient> = Patient.fetchRequest()
+        patientFetch.predicate = NSPredicate(format: "patientId == %@", patientIdStr)
+        
+        guard let patient = try context.fetch(patientFetch).first else {
+            throw NSError(domain: "CSVImporter", code: 4,
+                         userInfo: [NSLocalizedDescriptionKey: "患者ID \(patientIdStr) が見つかりません"])
+        }
+        
+        // Surgery作成
+        let surgery = Surgery(context: context)
+        surgery.id = UUID()
+        surgery.surgeryDate = opeDate
+        surgery.patient = patient
+        surgery.surgeryCategory = "脂肪注入"
+        surgery.surgeryType = "PureGraft"
+        
+        // NAC-IMF
+        if let value = parseDouble(data["NAC-IMF(R)"]) {
+            surgery.nacImfRight = value
+        }
+        if let value = parseDouble(data["NAC-IMF(L)"]) {
+            surgery.nacImfLeft = value
+        }
+        
+        // Skin thickness
+        if let value = parseDouble(data["Skin_thickness(R)"]) {
+            surgery.skinThicknessRight = value
+        }
+        if let value = parseDouble(data["Skin_thickness(L)"]) {
+            surgery.skinThicknessLeft = value
+        }
+        
+        // Injection Volume
+        if let value = parseDouble(data["Injection_Volume(R)"]) {
+            surgery.injectionVolumeRight = value
+        }
+        if let value = parseDouble(data["Injection_Volume(L)"]) {
+            surgery.injectionVolumeLeft = value
+        }
+        
+        surgery.harvestSite = data["採取部位"]
+        
+        // 注入部位
+        if let value = parseDouble(data["皮下(R)"]) {
+            surgery.subcutaneousRight = value
+        }
+        if let value = parseDouble(data["皮下(L)"]) {
+            surgery.subcutaneousLeft = value
+        }
+        if let value = parseDouble(data["乳腺下(R)"]) {
+            surgery.submammaryRight = value
+        }
+        if let value = parseDouble(data["乳腺下(L)"]) {
+            surgery.submammaryLeft = value
+        }
+        if let value = parseDouble(data["大胸筋内下(R)"]) {
+            surgery.intramuscularRight = value
+        }
+        if let value = parseDouble(data["大胸筋内下(L)"]) {
+            surgery.intramuscularLeft = value
+        }
+    }
+    
+    // MARK: - Import LabData Row
+    private func importLabDataRow(headers: [String], values: [String], rowNumber: Int) async throws {
+        var data: [String: String] = [:]
+        for (index, header) in headers.enumerated() {
+            if index < values.count {
+                data[header] = values[index]
+            }
+        }
+        
+        guard let opeDateStr = data["Ope日"], !opeDateStr.isEmpty,
+              let patientIdStr = data["患者ID"], !patientIdStr.isEmpty else {
+            return // 血液検査データがない場合はスキップ
+        }
+        
+        let opeDate = try parseDate(opeDateStr)
+        
+        // Surgery検索
+        let surgeryFetch: NSFetchRequest<Surgery> = Surgery.fetchRequest()
+        surgeryFetch.predicate = NSPredicate(
+            format: "surgeryDate == %@ AND patient.patientId == %@",
+            opeDate as NSDate,
+            patientIdStr
+        )
+        
+        guard let surgery = try context.fetch(surgeryFetch).first else {
+            throw NSError(domain: "CSVImporter", code: 5,
+                         userInfo: [NSLocalizedDescriptionKey: "手術記録が見つかりません"])
+        }
+        
+        // LabData作成
+        let labData = LabData(context: context)
+        labData.id = UUID()
+        labData.surgery = surgery
+        labData.testDate = opeDate
+        
+        // 血液検査データ
+        if let value = parseDouble(data["白血球数(WBC)"]) { labData.wbc = value }
+        if let value = parseDouble(data["赤血球数(RBC)"]) { labData.rbc = value }
+        if let value = parseDouble(data["血色素量(Hb)"]) { labData.hb = value }
+        if let value = parseDouble(data["ヘマトクリット(Ht)"]) { labData.ht = value }
+        if let value = parseDouble(data["血小板数"]) { labData.plt = value }
+        if let value = parseDouble(data["総蛋白(TP)"]) { labData.tp = value }
+        if let value = parseDouble(data["尿酸(UA)"]) { labData.ua = value }
+        if let value = parseDouble(data["尿素窒素(UN)"]) { labData.bun = value }
+        if let value = parseDouble(data["クレアチニン(CREA)"]) { labData.cre = value }
+        if let value = parseDouble(data["総コレステロール"]) { labData.tCho = value }
+        if let value = parseDouble(data["中性脂肪(TG)"]) { labData.tg = value }
+        if let value = parseDouble(data["総ビリルビン"]) { labData.tBil = value }
+    }
+    
+    // MARK: - Import FollowUp Row
+    private func importFollowUpRow(headers: [String], values: [String], rowNumber: Int) async throws {
+        var data: [String: String] = [:]
+        for (index, header) in headers.enumerated() {
+            if index < values.count {
+                data[header] = values[index]
+            }
+        }
+        
+        guard let opeDateStr = data["Ope日"], !opeDateStr.isEmpty,
+              let patientIdStr = data["患者ID"], !patientIdStr.isEmpty,
+              let period = data["経過期間"] else {
+            return
+        }
+        
+        let opeDate = try parseDate(opeDateStr)
+        
+        // Surgery検索
+        let surgeryFetch: NSFetchRequest<Surgery> = Surgery.fetchRequest()
+        surgeryFetch.predicate = NSPredicate(
+            format: "surgeryDate == %@ AND patient.patientId == %@",
+            opeDate as NSDate,
+            patientIdStr
+        )
+        
+        guard let surgery = try context.fetch(surgeryFetch).first else {
+            throw NSError(domain: "CSVImporter", code: 6,
+                         userInfo: [NSLocalizedDescriptionKey: "手術記録が見つかりません"])
+        }
+        
+        // 経過日数計算
+        let months: Int
+        switch period {
+        case "1M": months = 1
+        case "3M": months = 3
+        case "6M": months = 6
+        default: months = 0
+        }
+        
+        let followUpDate = Calendar.current.date(byAdding: .month, value: months, to: opeDate) ?? opeDate
+        
+        // FollowUp作成
+        let followUp = FollowUp(context: context)
+        followUp.id = UUID()
+        followUp.surgery = surgery
+        followUp.followUpDate = followUpDate
+        followUp.monthsAfterSurgery = Int16(months)
+        followUp.smokingStatus = data["術後喫煙"]
+        
+        if let value = parseDouble(data["体重"]) {
+            followUp.bodyWeightKg = value
+        }
+    }
+    
+    // MARK: - Helpers
+    private func parseDate(_ dateStr: String) throws -> Date {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
+        
+        guard let date = formatter.date(from: dateStr) else {
+            throw NSError(domain: "CSVImporter", code: 7,
+                         userInfo: [NSLocalizedDescriptionKey: "日付形式エラー: \(dateStr)"])
+        }
+        
+        return date
+    }
+    
+    private func parseDouble(_ str: String?) -> Double? {
+        guard let str = str, !str.isEmpty else { return nil }
+        return Double(str)
+    }
+    
+    // MARK: - Reset
+    func reset() {
+        currentStep = nil
+        progress = 0.0
+        status = "待機中"
+        isImporting = false
+        errors.removeAll()
+        patientCount = 0
+        surgeryCount = 0
+        labDataCount = 0
+        followUpCount = 0
+        completedSteps.removeAll()
+    }
+}

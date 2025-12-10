@@ -1,0 +1,125 @@
+import Foundation
+import CoreData
+import AppKit
+import ImageIO
+
+class PhotoManager {
+    static let shared = PhotoManager()
+    
+    // MARK: - EXIF日付の読み取り
+    func extractEXIFDate(from imageData: Data) -> Date? {
+        guard let imageSource = CGImageSourceCreateWithData(imageData as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any],
+              let exifDict = properties[kCGImagePropertyExifDictionary as String] as? [String: Any],
+              let dateString = exifDict[kCGImagePropertyExifDateTimeOriginal as String] as? String else {
+            return nil
+        }
+        
+        // EXIF日付フォーマット: "2025:03:05 14:30:25"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        return formatter.date(from: dateString)
+    }
+    
+    // MARK: - 術後経過日数の計算
+    func calculateDaysAfterSurgery(surgeryDate: Date, photoDate: Date) -> Int {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.day], from: surgeryDate, to: photoDate)
+        return components.day ?? 0
+    }
+    
+    // MARK: - 経過時期の推定
+    func estimateTiming(daysAfterSurgery: Int) -> String {
+        switch daysAfterSurgery {
+        case ..<0:
+            return "術前"
+        case 0...10:
+            return "1W"
+        case 25...35:
+            return "1M"
+        case 80...100:
+            return "3M"
+        case 170...190:
+            return "6M"
+        case 350...380:
+            return "12M"
+        default:
+            return "Day \(daysAfterSurgery)"
+        }
+    }
+    
+    // MARK: - サムネイル生成
+    func generateThumbnail(from imageData: Data, maxSize: CGFloat = 200) -> Data? {
+        guard let image = NSImage(data: imageData),
+              let tiffData = image.tiffRepresentation,
+              let bitmapImage = NSBitmapImageRep(data: tiffData) else {
+            return nil
+        }
+        
+        let originalSize = image.size
+        let aspectRatio = originalSize.width / originalSize.height
+        
+        var thumbnailSize: CGSize
+        if aspectRatio > 1 {
+            thumbnailSize = CGSize(width: maxSize, height: maxSize / aspectRatio)
+        } else {
+            thumbnailSize = CGSize(width: maxSize * aspectRatio, height: maxSize)
+        }
+        
+        let thumbnail = NSImage(size: thumbnailSize)
+        thumbnail.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: thumbnailSize),
+                   from: NSRect(origin: .zero, size: originalSize),
+                   operation: .copy,
+                   fraction: 1.0)
+        thumbnail.unlockFocus()
+        
+        guard let thumbnailTiff = thumbnail.tiffRepresentation,
+              let thumbnailBitmap = NSBitmapImageRep(data: thumbnailTiff),
+              let jpegData = thumbnailBitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.7]) else {
+            return nil
+        }
+        
+        return jpegData
+    }
+    
+    // MARK: - 写真の保存
+    func savePhoto(context: NSManagedObjectContext,
+                   surgery: Surgery,
+                   imageData: Data,
+                   timing: String,
+                   angle: String,
+                   exifDate: Date?,
+                   daysAfterSurgery: Int,
+                   notes: String?) {
+        let photo = Photo(context: context)
+        photo.id = UUID()
+        photo.imageData = imageData
+        photo.thumbnail = generateThumbnail(from: imageData)
+        photo.timing = timing
+        photo.angle = angle
+        photo.exifDate = exifDate
+        photo.daysAfterSurgery = Int16(daysAfterSurgery)
+        photo.uploadDate = Date()
+        photo.notes = notes
+        photo.surgery = surgery
+        
+        do {
+            try context.save()
+            print("✅ 写真保存成功: \(timing) - \(angle)")
+        } catch {
+            print("❌ 写真保存エラー: \(error)")
+        }
+    }
+    
+    // MARK: - 写真の削除
+    func deletePhoto(context: NSManagedObjectContext, photo: Photo) {
+        context.delete(photo)
+        do {
+            try context.save()
+            print("✅ 写真削除成功")
+        } catch {
+            print("❌ 写真削除エラー: \(error)")
+        }
+    }
+}

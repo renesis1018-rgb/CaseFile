@@ -1,0 +1,1287 @@
+//
+//  ContentView.swift
+//  CaseFile - 検索・ソート機能付き完全版
+//
+
+import SwiftUI
+import CoreData
+
+struct ContentView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(keyPath: \Patient.registeredDate, ascending: false)],
+        animation: .default)
+    private var patients: FetchedResults<Patient>
+    
+    @State private var showingAddPatient = false
+    @State private var showingAdvancedSearch = false
+    @State private var searchText = ""
+    @State private var showingToast = false
+    @State private var toastMessage = ""
+    
+    // ソート設定
+    @State private var sortOption: SortOption = .registeredDateDesc
+    
+    // 高度検索フィルター
+    @State private var filterPatientId = ""
+    @State private var filterAgeMin = ""
+    @State private var filterAgeMax = ""
+    @State private var filterBmiMin = ""
+    @State private var filterBmiMax = ""
+    @State private var filterProcedure = "全て"
+    @State private var filterBreastFeeding = "全て"
+    @State private var filterSmoking = "全て"
+    @State private var isFilterActive = false
+    
+    enum SortOption: String, CaseIterable {
+        case registeredDateDesc = "登録日（新しい順）"
+        case registeredDateAsc = "登録日（古い順）"
+        case patientIdAsc = "患者ID（昇順）"
+        case patientIdDesc = "患者ID（降順）"
+        case ageAsc = "年齢（若い順）"
+        case ageDesc = "年齢（年配順）"
+        case bmiAsc = "BMI（低い順）"
+        case bmiDesc = "BMI（高い順）"
+    }
+    
+    var filteredAndSortedPatients: [Patient] {
+        var result = Array(patients)
+        
+        // 簡易検索フィルター
+        if !searchText.isEmpty {
+            result = result.filter { patient in
+                patient.patientId?.localizedCaseInsensitiveContains(searchText) == true
+            }
+        }
+        
+        // 高度検索フィルター
+        if isFilterActive {
+            if !filterPatientId.isEmpty {
+                result = result.filter { patient in
+                    patient.patientId?.localizedCaseInsensitiveContains(filterPatientId) == true
+                }
+            }
+            
+            if let ageMin = Int16(filterAgeMin) {
+                result = result.filter { $0.age >= ageMin }
+            }
+            
+            if let ageMax = Int16(filterAgeMax) {
+                result = result.filter { $0.age <= ageMax }
+            }
+            
+            if let bmiMin = Double(filterBmiMin) {
+                result = result.filter { $0.bmi >= bmiMin }
+            }
+            
+            if let bmiMax = Double(filterBmiMax) {
+                result = result.filter { $0.bmi <= bmiMax }
+            }
+            
+            if filterProcedure != "全て" {
+                result = result.filter { patient in
+                    if let surgeries = patient.surgeries as? Set<Surgery> {
+                        return surgeries.contains { $0.procedure == filterProcedure }
+                    }
+                    return false
+                }
+            }
+            
+            if filterBreastFeeding != "全て" {
+                result = result.filter { patient in
+                    if let surgeries = patient.surgeries as? Set<Surgery> {
+                        return surgeries.contains { $0.breastFeeding == filterBreastFeeding }
+                    }
+                    return false
+                }
+            }
+            
+            if filterSmoking != "全て" {
+                result = result.filter { patient in
+                    if let surgeries = patient.surgeries as? Set<Surgery> {
+                        return surgeries.contains { $0.smoking == filterSmoking }
+                    }
+                    return false
+                }
+            }
+        }
+        
+        // ソート
+        switch sortOption {
+        case .registeredDateDesc:
+            result.sort { ($0.registeredDate ?? Date()) > ($1.registeredDate ?? Date()) }
+        case .registeredDateAsc:
+            result.sort { ($0.registeredDate ?? Date()) < ($1.registeredDate ?? Date()) }
+        case .patientIdAsc:
+            result.sort { ($0.patientId ?? "") < ($1.patientId ?? "") }
+        case .patientIdDesc:
+            result.sort { ($0.patientId ?? "") > ($1.patientId ?? "") }
+        case .ageAsc:
+            result.sort { $0.age < $1.age }
+        case .ageDesc:
+            result.sort { $0.age > $1.age }
+        case .bmiAsc:
+            result.sort { $0.bmi < $1.bmi }
+        case .bmiDesc:
+            result.sort { $0.bmi > $1.bmi }
+        }
+        
+        return result
+    }
+    
+    var body: some View {
+        NavigationSplitView {
+            VStack {
+                // 検索バー
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.gray)
+                    TextField("患者ID検索", text: $searchText)
+                        .textFieldStyle(.plain)
+                    
+                    // 高度検索ボタン
+                    Button(action: { showingAdvancedSearch = true }) {
+                        Image(systemName: "slider.horizontal.3")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 16))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(8)
+                .background(Color(.systemGray).opacity(0.1))
+                .cornerRadius(8)
+                .padding(.horizontal)
+                
+                // ソート・フィルター表示
+                HStack {
+                    Picker("並び替え", selection: $sortOption) {
+                        ForEach(SortOption.allCases, id: \.self) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 200)
+                    
+                    Spacer()
+                    
+                    if isFilterActive {
+                        HStack {
+                            Text("フィルター適用中")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                            Button(action: { clearFilters() }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.gray)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+                    
+                    Text("\(filteredAndSortedPatients.count)件")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+                
+                // 患者リスト
+                List {
+                    ForEach(filteredAndSortedPatients) { patient in
+                        NavigationLink(destination: PatientDetailView(patient: patient, onSave: { message in
+                            showToast(message)
+                        })) {
+                            PatientRowView(patient: patient)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .onDelete(perform: deletePatients)
+                }
+                .listStyle(.inset)
+            }
+            .navigationTitle("症例管理")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { showingAddPatient = true }) {
+                        Label("患者追加", systemImage: "plus")
+                    }
+                }
+            }
+            .popover(isPresented: $showingAddPatient) {
+                AddPatientView(isPresented: $showingAddPatient, onSave: { message in
+                    showToast(message)
+                })
+                .environment(\.managedObjectContext, viewContext)
+                .frame(width: 500, height: 400)
+            }
+            .sheet(isPresented: $showingAdvancedSearch) {
+                AdvancedSearchView(
+                    filterPatientId: $filterPatientId,
+                    filterAgeMin: $filterAgeMin,
+                    filterAgeMax: $filterAgeMax,
+                    filterBmiMin: $filterBmiMin,
+                    filterBmiMax: $filterBmiMax,
+                    filterProcedure: $filterProcedure,
+                    filterBreastFeeding: $filterBreastFeeding,
+                    filterSmoking: $filterSmoking,
+                    isFilterActive: $isFilterActive,
+                    isPresented: $showingAdvancedSearch
+                )
+            }
+            .overlay(
+                ToastView(message: toastMessage, isShowing: $showingToast)
+                    .padding(.bottom, 50)
+                , alignment: .bottom
+            )
+        } detail: {
+            Text("患者を選択してください")
+                .foregroundColor(.gray)
+        }
+    }
+    
+    private func deletePatients(offsets: IndexSet) {
+        withAnimation {
+            offsets.map { filteredAndSortedPatients[$0] }.forEach(viewContext.delete)
+            do {
+                try viewContext.save()
+                showToast("患者を削除しました")
+            } catch {
+                print("削除エラー: \(error)")
+            }
+        }
+    }
+    
+    private func clearFilters() {
+        filterPatientId = ""
+        filterAgeMin = ""
+        filterAgeMax = ""
+        filterBmiMin = ""
+        filterBmiMax = ""
+        filterProcedure = "全て"
+        filterBreastFeeding = "全て"
+        filterSmoking = "全て"
+        isFilterActive = false
+    }
+    
+    private func showToast(_ message: String) {
+        toastMessage = message
+        showingToast = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            showingToast = false
+        }
+    }
+}
+
+// MARK: - 高度検索画面
+struct AdvancedSearchView: View {
+    @Binding var filterPatientId: String
+    @Binding var filterAgeMin: String
+    @Binding var filterAgeMax: String
+    @Binding var filterBmiMin: String
+    @Binding var filterBmiMax: String
+    @Binding var filterProcedure: String
+    @Binding var filterBreastFeeding: String
+    @Binding var filterSmoking: String
+    @Binding var isFilterActive: Bool
+    @Binding var isPresented: Bool
+    
+    let procedures = ["全て", "PureGraft", "Condenserich", "ADRC"]
+    let breastFeedingOptions = ["全て", "never", "1", "2", "3"]
+    let smokingOptions = ["全て", "never", "ex-", "current"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // ヘッダー
+            HStack {
+                Button("キャンセル") { isPresented = false }
+                Spacer()
+                Text("高度検索").font(.headline)
+                Spacer()
+                Button("検索") { applyFilters() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+            .background(Color(.windowBackgroundColor))
+            
+            Divider()
+            
+            // フィルター項目
+            Form {
+                Section(header: Text("患者情報")) {
+                    TextField("患者ID", text: $filterPatientId)
+                    
+                    HStack {
+                        TextField("年齢（最小）", text: $filterAgeMin)
+                        Text("〜")
+                        TextField("年齢（最大）", text: $filterAgeMax)
+                    }
+                    
+                    HStack {
+                        TextField("BMI（最小）", text: $filterBmiMin)
+                        Text("〜")
+                        TextField("BMI（最大）", text: $filterBmiMax)
+                    }
+                }
+                
+                Section(header: Text("手術情報")) {
+                    Picker("術式", selection: $filterProcedure) {
+                        ForEach(procedures, id: \.self) { Text($0) }
+                    }
+                    
+                    Picker("授乳歴", selection: $filterBreastFeeding) {
+                        ForEach(breastFeedingOptions, id: \.self) { Text($0) }
+                    }
+                    
+                    Picker("喫煙歴", selection: $filterSmoking) {
+                        ForEach(smokingOptions, id: \.self) { Text($0) }
+                    }
+                }
+                
+                Section {
+                    Button("フィルターをクリア") {
+                        clearAllFilters()
+                    }
+                    .foregroundColor(.red)
+                }
+            }
+            .padding()
+        }
+        .frame(width: 500, height: 500)
+    }
+    
+    private func applyFilters() {
+        isFilterActive = !filterPatientId.isEmpty ||
+                        !filterAgeMin.isEmpty ||
+                        !filterAgeMax.isEmpty ||
+                        !filterBmiMin.isEmpty ||
+                        !filterBmiMax.isEmpty ||
+                        filterProcedure != "全て" ||
+                        filterBreastFeeding != "全て" ||
+                        filterSmoking != "全て"
+        isPresented = false
+    }
+    
+    private func clearAllFilters() {
+        filterPatientId = ""
+        filterAgeMin = ""
+        filterAgeMax = ""
+        filterBmiMin = ""
+        filterBmiMax = ""
+        filterProcedure = "全て"
+        filterBreastFeeding = "全て"
+        filterSmoking = "全て"
+        isFilterActive = false
+        isPresented = false
+    }
+}
+
+// MARK: - トースト通知
+struct ToastView: View {
+    let message: String
+    @Binding var isShowing: Bool
+    
+    var body: some View {
+        if isShowing {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                Text(message)
+                    .foregroundColor(.white)
+            }
+            .padding()
+            .background(Color.black.opacity(0.8))
+            .cornerRadius(10)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .animation(.easeInOut, value: isShowing)
+        }
+    }
+}
+
+// MARK: - 患者行表示
+struct PatientRowView: View {
+    let patient: Patient
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("ID: \(patient.patientId ?? "未設定")")
+                    .font(.headline)
+                Text("\(patient.age)歳 | BMI: \(String(format: "%.1f", patient.bmi))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if let surgeries = patient.surgeries as? Set<Surgery>, !surgeries.isEmpty {
+                    Text("手術: \(surgeries.count)件")
+                        .font(.caption2)
+                        .foregroundColor(.blue)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .foregroundColor(.gray)
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 患者詳細画面
+struct PatientDetailView: View {
+    @ObservedObject var patient: Patient
+    @State private var showingAddSurgery = false
+    @State private var showingEditPatient = false
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    var onSave: (String) -> Void
+    
+    var surgeries: [Surgery] {
+        (patient.surgeries as? Set<Surgery>)?.sorted {
+            $0.surgeryDate ?? Date() > $1.surgeryDate ?? Date()
+        } ?? []
+    }
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // 患者基本情報
+                GroupBox(label: 
+                    HStack {
+                        Label("患者情報", systemImage: "person.fill")
+                        Spacer()
+                        Button(action: { showingEditPatient = true }) {
+                            HStack {
+                                Image(systemName: "pencil")
+                                Text("編集")
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        InfoRow(label: "ID", value: patient.patientId ?? "未設定")
+                        InfoRow(label: "年齢", value: "\(patient.age)歳")
+                        InfoRow(label: "身長", value: String(format: "%.1f cm", patient.height * 100))
+                        InfoRow(label: "体重", value: String(format: "%.1f kg", patient.weight))
+                        InfoRow(label: "BMI", value: String(format: "%.1f", patient.bmi))
+                        if let notes = patient.notes, !notes.isEmpty {
+                            Text("メモ: \(notes)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                // 手術記録一覧
+                GroupBox(label: Label("手術記録", systemImage: "heart.text.square.fill")) {
+                    if surgeries.isEmpty {
+                        Text("手術記録がありません")
+                            .foregroundColor(.gray)
+                            .padding()
+                    } else {
+                        ForEach(surgeries) { surgery in
+                            NavigationLink(destination: SurgeryDetailView(surgery: surgery, onSave: onSave)) {
+                                SurgeryRowView(surgery: surgery)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Divider()
+                        }
+                    }
+                }
+                
+                // 手術追加ボタン
+                Button(action: { showingAddSurgery = true }) {
+                    Label("新規手術を追加", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("患者詳細")
+        .navigationBarBackButtonHidden(false)
+        .popover(isPresented: $showingAddSurgery) {
+            AddSurgeryView(patient: patient, isPresented: $showingAddSurgery, onSave: onSave)
+                .environment(\.managedObjectContext, viewContext)
+                .frame(width: 600, height: 700)
+        }
+        .popover(isPresented: $showingEditPatient) {
+            EditPatientView(patient: patient, isPresented: $showingEditPatient, onSave: onSave)
+                .environment(\.managedObjectContext, viewContext)
+                .frame(width: 500, height: 400)
+        }
+    }
+}
+
+// MARK: - 手術行表示
+struct SurgeryRowView: View {
+    let surgery: Surgery
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(surgery.procedure ?? "未設定")
+                    .font(.headline)
+                if let date = surgery.surgeryDate {
+                    Text(date, style: .date)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                HStack(spacing: 12) {
+                    if surgery.injectionVolumeR > 0 {
+                        Text("右: \(Int(surgery.injectionVolumeR))ml")
+                            .font(.caption2)
+                    }
+                    if surgery.injectionVolumeL > 0 {
+                        Text("左: \(Int(surgery.injectionVolumeL))ml")
+                            .font(.caption2)
+                    }
+                }
+                .foregroundColor(.blue)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .foregroundColor(.gray)
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 手術詳細画面
+struct SurgeryDetailView: View {
+    @ObservedObject var surgery: Surgery
+    @State private var showingAddFollowUp = false
+    @State private var showingEditSurgery = false
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    var onSave: (String) -> Void
+    
+    var followUps: [FollowUp] {
+        (surgery.followUps as? Set<FollowUp>)?.sorted {
+            $0.measurementDate ?? Date() < $1.measurementDate ?? Date()
+        } ?? []
+    }
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // 手術情報
+                GroupBox(label: 
+                    HStack {
+                        Label("手術情報", systemImage: "cross.case.fill")
+                        Spacer()
+                        Button(action: { showingEditSurgery = true }) {
+                            HStack {
+                                Image(systemName: "pencil")
+                                Text("編集")
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        InfoRow(label: "術式", value: surgery.procedure ?? "未設定")
+                        if let date = surgery.surgeryDate {
+                            InfoRow(label: "手術日", value: date.formatted(date: .long, time: .omitted))
+                        }
+                        InfoRow(label: "授乳歴", value: surgery.breastFeeding ?? "-")
+                        InfoRow(label: "喫煙歴", value: surgery.smoking ?? "-")
+                        
+                        if let site = surgery.donorSite {
+                            if site == "その他", let other = surgery.donorSiteOther {
+                                InfoRow(label: "採取部位", value: "その他（\(other)）")
+                            } else {
+                                InfoRow(label: "採取部位", value: site)
+                            }
+                        }
+                        
+                        HStack {
+                            InfoRow(label: "注入量（右）", value: "\(Int(surgery.injectionVolumeR))ml")
+                            Spacer()
+                            InfoRow(label: "注入量（左）", value: "\(Int(surgery.injectionVolumeL))ml")
+                        }
+                        
+                        HStack {
+                            InfoRow(label: "術前Vectra（右）", value: "\(Int(surgery.preOpVectraR))ml")
+                            Spacer()
+                            InfoRow(label: "術前Vectra（左）", value: "\(Int(surgery.preOpVectraL))ml")
+                        }
+                        
+                        if let notes = surgery.notes, !notes.isEmpty {
+                            Text("メモ: \(notes)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                // 術後経過一覧
+                GroupBox(label: Label("術後経過", systemImage: "chart.line.uptrend.xyaxis")) {
+                    if followUps.isEmpty {
+                        Text("経過観察データがありません")
+                            .foregroundColor(.gray)
+                            .padding()
+                    } else {
+                        ForEach(followUps) { followUp in
+                            HStack {
+                                FollowUpRowView(followUp: followUp)
+                                Spacer()
+                                NavigationLink(destination: EditFollowUpView(followUp: followUp, onSave: onSave)) {
+                                    HStack {
+                                        Image(systemName: "pencil")
+                                        Text("編集")
+                                    }
+                                    .foregroundColor(.blue)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Color.blue.opacity(0.1))
+                                    .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Divider()
+                        }
+                    }
+                }
+                
+                // 経過追加ボタン
+                Button(action: { showingAddFollowUp = true }) {
+                    Label("術後経過を追加", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("手術詳細")
+        .navigationBarBackButtonHidden(false)
+        .popover(isPresented: $showingAddFollowUp) {
+            AddFollowUpView(surgery: surgery, isPresented: $showingAddFollowUp, onSave: onSave)
+                .environment(\.managedObjectContext, viewContext)
+                .frame(width: 500, height: 500)
+        }
+        .popover(isPresented: $showingEditSurgery) {
+            EditSurgeryView(surgery: surgery, isPresented: $showingEditSurgery, onSave: onSave)
+                .environment(\.managedObjectContext, viewContext)
+                .frame(width: 600, height: 700)
+        }
+    }
+}
+
+// MARK: - 経過観察行表示
+struct FollowUpRowView: View {
+    let followUp: FollowUp
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(followUp.timing ?? "未設定")
+                    .font(.headline)
+                if let date = followUp.measurementDate {
+                    Text(date, style: .date)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            HStack(spacing: 20) {
+                VStack(alignment: .leading) {
+                    Text("Vectra（右）")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                    Text("\(Int(followUp.vectraR))ml")
+                        .font(.subheadline)
+                    if followUp.retentionRateR > 0 {
+                        Text("定着率: \(String(format: "%.1f", followUp.retentionRateR))%")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
+                }
+                
+                VStack(alignment: .leading) {
+                    Text("Vectra（左）")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                    Text("\(Int(followUp.vectraL))ml")
+                        .font(.subheadline)
+                    if followUp.retentionRateL > 0 {
+                        Text("定着率: \(String(format: "%.1f", followUp.retentionRateL))%")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - 汎用情報行
+struct InfoRow: View {
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Text(label)
+                .foregroundColor(.secondary)
+                .frame(width: 120, alignment: .leading)
+            Text(value)
+                .fontWeight(.medium)
+        }
+    }
+}
+
+// MARK: - 患者追加画面
+struct AddPatientView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @Binding var isPresented: Bool
+    var onSave: (String) -> Void
+    
+    @State private var patientId = ""
+    @State private var age = ""
+    @State private var height = ""
+    @State private var weight = ""
+    @State private var notes = ""
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("キャンセル") { isPresented = false }
+                Spacer()
+                Text("新規患者登録").font(.headline)
+                Spacer()
+                Button("保存") { savePatient() }
+                    .disabled(patientId.isEmpty || age.isEmpty || height.isEmpty || weight.isEmpty)
+            }
+            .padding()
+            .background(Color(.windowBackgroundColor))
+            
+            Divider()
+            
+            Form {
+                TextField("患者ID", text: $patientId)
+                TextField("年齢", text: $age)
+                TextField("身長(cm)", text: $height)
+                TextField("体重(kg)", text: $weight)
+                TextField("メモ（任意）", text: $notes, axis: .vertical)
+                    .lineLimit(3...5)
+            }
+            .padding()
+        }
+        .frame(width: 500, height: 400)
+    }
+    
+    private func savePatient() {
+        guard let ageInt = Int16(age),
+              let heightDouble = Double(height),
+              let weightDouble = Double(weight) else { return }
+        
+        do {
+            _ = try Persistence.shared.savePatient(
+                patientId: patientId,
+                age: ageInt,
+                height: heightDouble / 100.0,
+                weight: weightDouble,
+                notes: notes.isEmpty ? nil : notes
+            )
+            isPresented = false
+            onSave("患者ID: \(patientId) を登録しました")
+        } catch {
+            print("保存エラー: \(error)")
+        }
+    }
+}
+
+// MARK: - 患者編集画面
+struct EditPatientView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @ObservedObject var patient: Patient
+    @Binding var isPresented: Bool
+    var onSave: (String) -> Void
+    
+    @State private var patientId = ""
+    @State private var age = ""
+    @State private var height = ""
+    @State private var weight = ""
+    @State private var notes = ""
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("キャンセル") { isPresented = false }
+                Spacer()
+                Text("患者情報編集").font(.headline)
+                Spacer()
+                Button("保存") { updatePatient() }
+            }
+            .padding()
+            .background(Color(.windowBackgroundColor))
+            
+            Divider()
+            
+            Form {
+                TextField("患者ID", text: $patientId)
+                TextField("年齢", text: $age)
+                TextField("身長(cm)", text: $height)
+                TextField("体重(kg)", text: $weight)
+                TextField("メモ（任意）", text: $notes, axis: .vertical)
+                    .lineLimit(3...5)
+            }
+            .padding()
+        }
+        .frame(width: 500, height: 400)
+        .onAppear {
+            patientId = patient.patientId ?? ""
+            age = String(patient.age)
+            height = String(format: "%.1f", patient.height * 100)
+            weight = String(format: "%.1f", patient.weight)
+            notes = patient.notes ?? ""
+        }
+    }
+    
+    private func updatePatient() {
+        guard let ageInt = Int16(age),
+              let heightDouble = Double(height),
+              let weightDouble = Double(weight) else { return }
+        
+        patient.patientId = patientId
+        patient.age = ageInt
+        patient.height = heightDouble / 100.0
+        patient.weight = weightDouble
+        patient.bmi = weightDouble / ((heightDouble / 100.0) * (heightDouble / 100.0))
+        patient.notes = notes.isEmpty ? nil : notes
+        
+        do {
+            try viewContext.save()
+            isPresented = false
+            onSave("患者情報を更新しました")
+        } catch {
+            print("更新エラー: \(error)")
+        }
+    }
+}
+
+// MARK: - 手術追加画面
+struct AddSurgeryView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    let patient: Patient
+    @Binding var isPresented: Bool
+    var onSave: (String) -> Void
+    
+    @State private var surgeryDate = Date()
+    @State private var procedure = "PureGraft"
+    @State private var breastFeeding = "never"
+    @State private var smoking = "never"
+    @State private var donorSite = "大腿前面"
+    @State private var donorSiteOther = ""
+    @State private var injectionVolumeR = ""
+    @State private var injectionVolumeL = ""
+    @State private var preOpVectraR = ""
+    @State private var preOpVectraL = ""
+    @State private var nacImf = ""
+    @State private var skinLaxity = "Fair"
+    @State private var notes = ""
+    
+    let procedures = ["PureGraft", "Condenserich", "ADRC"]
+    let breastFeedingOptions = ["never", "1", "2", "3"]
+    let smokingOptions = ["never", "ex-", "current"]
+    let donorSiteOptions = ["大腿前面", "大腿後面", "大腿両面", "腹部", "その他"]
+    let skinLaxityOptions = ["Poor", "Fair", "Good"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("キャンセル") { isPresented = false }
+                Spacer()
+                Text("新規手術登録").font(.headline)
+                Spacer()
+                Button("保存") { saveSurgery() }
+            }
+            .padding()
+            .background(Color(.windowBackgroundColor))
+            
+            Divider()
+            
+            ScrollView {
+                Form {
+                    DatePicker("手術日", selection: $surgeryDate, displayedComponents: .date)
+                    Picker("術式", selection: $procedure) {
+                        ForEach(procedures, id: \.self) { Text($0) }
+                    }
+                    Picker("授乳歴", selection: $breastFeeding) {
+                        ForEach(breastFeedingOptions, id: \.self) { Text($0) }
+                    }
+                    Picker("喫煙歴", selection: $smoking) {
+                        ForEach(smokingOptions, id: \.self) { Text($0) }
+                    }
+                    Picker("採取部位", selection: $donorSite) {
+                        ForEach(donorSiteOptions, id: \.self) { Text($0) }
+                    }
+                    if donorSite == "その他" {
+                        TextField("採取部位詳細", text: $donorSiteOther)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    TextField("注入量（右）ml", text: $injectionVolumeR)
+                    TextField("注入量（左）ml", text: $injectionVolumeL)
+                    TextField("術前Vectra（右）ml", text: $preOpVectraR)
+                    TextField("術前Vectra（左）ml", text: $preOpVectraL)
+                    TextField("NAC-IMF (cm)", text: $nacImf)
+                    Picker("Skin Laxity", selection: $skinLaxity) {
+                        ForEach(skinLaxityOptions, id: \.self) { Text($0) }
+                    }
+                    TextField("メモ（任意）", text: $notes, axis: .vertical)
+                        .lineLimit(3...5)
+                }
+                .padding()
+            }
+        }
+        .frame(width: 600, height: 700)
+    }
+    
+    private func saveSurgery() {
+        do {
+            _ = try Persistence.shared.saveSurgery(
+                patient: patient,
+                surgeryDate: surgeryDate,
+                procedure: procedure,
+                breastFeeding: breastFeeding,
+                smoking: smoking,
+                donorSite: donorSite,
+                donorSiteOther: donorSite == "その他" ? donorSiteOther : nil,
+                injectionVolumeR: Double(injectionVolumeR) ?? 0,
+                injectionVolumeL: Double(injectionVolumeL) ?? 0,
+                preOpVectraR: Double(preOpVectraR),
+                preOpVectraL: Double(preOpVectraL),
+                nacImf: Double(nacImf),
+                skinLaxity: skinLaxity,
+                notes: notes.isEmpty ? nil : notes
+            )
+            isPresented = false
+            onSave("手術記録を登録しました")
+        } catch {
+            print("保存エラー: \(error)")
+        }
+    }
+}
+
+// MARK: - 手術編集画面
+struct EditSurgeryView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @ObservedObject var surgery: Surgery
+    @Binding var isPresented: Bool
+    var onSave: (String) -> Void
+    
+    @State private var surgeryDate = Date()
+    @State private var procedure = "PureGraft"
+    @State private var breastFeeding = "never"
+    @State private var smoking = "never"
+    @State private var donorSite = "大腿前面"
+    @State private var donorSiteOther = ""
+    @State private var injectionVolumeR = ""
+    @State private var injectionVolumeL = ""
+    @State private var preOpVectraR = ""
+    @State private var preOpVectraL = ""
+    @State private var nacImf = ""
+    @State private var skinLaxity = "Fair"
+    @State private var notes = ""
+    
+    let procedures = ["PureGraft", "Condenserich", "ADRC"]
+    let breastFeedingOptions = ["never", "1", "2", "3"]
+    let smokingOptions = ["never", "ex-", "current"]
+    let donorSiteOptions = ["大腿前面", "大腿後面", "大腿両面", "腹部", "その他"]
+    let skinLaxityOptions = ["Poor", "Fair", "Good"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("キャンセル") { isPresented = false }
+                Spacer()
+                Text("手術情報編集").font(.headline)
+                Spacer()
+                Button("保存") { updateSurgery() }
+            }
+            .padding()
+            .background(Color(.windowBackgroundColor))
+            
+            Divider()
+            
+            ScrollView {
+                Form {
+                    DatePicker("手術日", selection: $surgeryDate, displayedComponents: .date)
+                    Picker("術式", selection: $procedure) {
+                        ForEach(procedures, id: \.self) { Text($0) }
+                    }
+                    Picker("授乳歴", selection: $breastFeeding) {
+                        ForEach(breastFeedingOptions, id: \.self) { Text($0) }
+                    }
+                    Picker("喫煙歴", selection: $smoking) {
+                        ForEach(smokingOptions, id: \.self) { Text($0) }
+                    }
+                    Picker("採取部位", selection: $donorSite) {
+                        ForEach(donorSiteOptions, id: \.self) { Text($0) }
+                    }
+                    if donorSite == "その他" {
+                        TextField("採取部位詳細", text: $donorSiteOther)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    TextField("注入量（右）ml", text: $injectionVolumeR)
+                    TextField("注入量（左）ml", text: $injectionVolumeL)
+                    TextField("術前Vectra（右）ml", text: $preOpVectraR)
+                    TextField("術前Vectra（左）ml", text: $preOpVectraL)
+                    TextField("NAC-IMF (cm)", text: $nacImf)
+                    Picker("Skin Laxity", selection: $skinLaxity) {
+                        ForEach(skinLaxityOptions, id: \.self) { Text($0) }
+                    }
+                    TextField("メモ（任意）", text: $notes, axis: .vertical)
+                        .lineLimit(3...5)
+                }
+                .padding()
+            }
+        }
+        .frame(width: 600, height: 700)
+        .onAppear {
+            surgeryDate = surgery.surgeryDate ?? Date()
+            procedure = surgery.procedure ?? "PureGraft"
+            breastFeeding = surgery.breastFeeding ?? "never"
+            smoking = surgery.smoking ?? "never"
+            donorSite = surgery.donorSite ?? "大腿前面"
+            donorSiteOther = surgery.donorSiteOther ?? ""
+            injectionVolumeR = String(format: "%.0f", surgery.injectionVolumeR)
+            injectionVolumeL = String(format: "%.0f", surgery.injectionVolumeL)
+            preOpVectraR = String(format: "%.0f", surgery.preOpVectraR)
+            preOpVectraL = String(format: "%.0f", surgery.preOpVectraL)
+            nacImf = String(format: "%.1f", surgery.nacImf)
+            skinLaxity = surgery.skinLaxity ?? "Fair"
+            notes = surgery.notes ?? ""
+        }
+    }
+    
+    private func updateSurgery() {
+        surgery.surgeryDate = surgeryDate
+        surgery.procedure = procedure
+        surgery.breastFeeding = breastFeeding
+        surgery.smoking = smoking
+        surgery.donorSite = donorSite
+        surgery.donorSiteOther = donorSite == "その他" ? donorSiteOther : nil
+        surgery.injectionVolumeR = Double(injectionVolumeR) ?? 0
+        surgery.injectionVolumeL = Double(injectionVolumeL) ?? 0
+        surgery.preOpVectraR = Double(preOpVectraR) ?? 0
+        surgery.preOpVectraL = Double(preOpVectraL) ?? 0
+        surgery.nacImf = Double(nacImf) ?? 0
+        surgery.skinLaxity = skinLaxity
+        surgery.notes = notes.isEmpty ? nil : notes
+        
+        do {
+            try viewContext.save()
+            isPresented = false
+            onSave("手術情報を更新しました")
+        } catch {
+            print("更新エラー: \(error)")
+        }
+    }
+}
+
+// MARK: - 術後経過追加画面
+struct AddFollowUpView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    let surgery: Surgery
+    @Binding var isPresented: Bool
+    var onSave: (String) -> Void
+    
+    @State private var timing = "1M"
+    @State private var measurementDate = Date()
+    @State private var vectraR = ""
+    @State private var vectraL = ""
+    @State private var bodyWeight = ""
+    @State private var breastQScore = ""
+    @State private var smokingStatus = "なし"
+    @State private var notes = ""
+    
+    let timingOptions = ["1week", "1M", "3M", "6M"]
+    let smokingStatusOptions = ["なし", "あり"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("キャンセル") { isPresented = false }
+                Spacer()
+                Text("術後経過追加").font(.headline)
+                Spacer()
+                Button("保存") { saveFollowUp() }
+            }
+            .padding()
+            .background(Color(.windowBackgroundColor))
+            
+            Divider()
+            
+            Form {
+                Picker("測定タイミング", selection: $timing) {
+                    ForEach(timingOptions, id: \.self) { Text($0) }
+                }
+                DatePicker("測定日", selection: $measurementDate, displayedComponents: .date)
+                TextField("Vectra（右）ml", text: $vectraR)
+                TextField("Vectra（左）ml", text: $vectraL)
+                TextField("体重 kg", text: $bodyWeight)
+                TextField("BREAST-Qスコア", text: $breastQScore)
+                Picker("喫煙状況", selection: $smokingStatus) {
+                    ForEach(smokingStatusOptions, id: \.self) { Text($0) }
+                }
+                TextField("メモ（任意）", text: $notes, axis: .vertical)
+                    .lineLimit(3...5)
+            }
+            .padding()
+        }
+        .frame(width: 500, height: 500)
+    }
+    
+    private func saveFollowUp() {
+        do {
+            _ = try Persistence.shared.saveFollowUp(
+                surgery: surgery,
+                timing: timing,
+                measurementDate: measurementDate,
+                vectraR: Double(vectraR),
+                vectraL: Double(vectraL),
+                bodyWeight: Double(bodyWeight),
+                breastQScore: Int16(breastQScore),
+                smokingStatus: smokingStatus,
+                notes: notes.isEmpty ? nil : notes
+            )
+            isPresented = false
+            onSave("術後経過（\(timing)）を登録しました")
+        } catch {
+            print("保存エラー: \(error)")
+        }
+    }
+}
+
+// MARK: - 術後経過編集画面
+struct EditFollowUpView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @ObservedObject var followUp: FollowUp
+    var onSave: (String) -> Void
+    
+    @State private var timing = "1M"
+    @State private var measurementDate = Date()
+    @State private var vectraR = ""
+    @State private var vectraL = ""
+    @State private var bodyWeight = ""
+    @State private var breastQScore = ""
+    @State private var smokingStatus = "なし"
+    @State private var notes = ""
+    
+    let timingOptions = ["1week", "1M", "3M", "6M"]
+    let smokingStatusOptions = ["なし", "あり"]
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Text("術後経過編集")
+                    .font(.headline)
+                    .padding(.top)
+                
+                Form {
+                    Picker("測定タイミング", selection: $timing) {
+                        ForEach(timingOptions, id: \.self) { Text($0) }
+                    }
+                    DatePicker("測定日", selection: $measurementDate, displayedComponents: .date)
+                    TextField("Vectra（右）ml", text: $vectraR)
+                    TextField("Vectra（左）ml", text: $vectraL)
+                    TextField("体重 kg", text: $bodyWeight)
+                    TextField("BREAST-Qスコア", text: $breastQScore)
+                    Picker("喫煙状況", selection: $smokingStatus) {
+                        ForEach(smokingStatusOptions, id: \.self) { Text($0) }
+                    }
+                    TextField("メモ（任意）", text: $notes, axis: .vertical)
+                        .lineLimit(3...5)
+                }
+                .padding()
+                
+                Button("保存") {
+                    updateFollowUp()
+                }
+                .padding()
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(10)
+            }
+            .padding()
+        }
+        .navigationTitle("術後経過編集")
+        .onAppear {
+            timing = followUp.timing ?? "1M"
+            measurementDate = followUp.measurementDate ?? Date()
+            vectraR = String(format: "%.0f", followUp.vectraR)
+            vectraL = String(format: "%.0f", followUp.vectraL)
+            bodyWeight = String(format: "%.1f", followUp.bodyWeight)
+            breastQScore = String(followUp.breastQScore)
+            smokingStatus = followUp.smokingStatus ?? "なし"
+            notes = followUp.notes ?? ""
+        }
+    }
+    
+    private func updateFollowUp() {
+        followUp.timing = timing
+        followUp.measurementDate = measurementDate
+        followUp.vectraR = Double(vectraR) ?? 0
+        followUp.vectraL = Double(vectraL) ?? 0
+        followUp.bodyWeight = Double(bodyWeight) ?? 0
+        followUp.breastQScore = Int16(breastQScore) ?? 0
+        followUp.smokingStatus = smokingStatus
+        followUp.notes = notes.isEmpty ? nil : notes
+        
+        if let surgery = followUp.surgery {
+            let injectionR = surgery.injectionVolumeR
+            let injectionL = surgery.injectionVolumeL
+            let preVecR = surgery.preOpVectraR
+            let preVecL = surgery.preOpVectraL
+            
+            if injectionR > 0, let vecR = Double(vectraR), preVecR > 0 {
+                followUp.retentionRateR = ((vecR - preVecR) / injectionR) * 100
+            }
+            
+            if injectionL > 0, let vecL = Double(vectraL), preVecL > 0 {
+                followUp.retentionRateL = ((vecL - preVecL) / injectionL) * 100
+            }
+        }
+        
+        do {
+            try viewContext.save()
+            onSave("術後経過（\(timing)）を更新しました")
+        } catch {
+            print("更新エラー: \(error)")
+        }
+    }
+}
+
+// MARK: - Preview
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .environment(\.managedObjectContext, Persistence.preview.container.viewContext)
+    }
+}

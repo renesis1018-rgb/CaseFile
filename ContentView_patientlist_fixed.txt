@@ -1,0 +1,15 @@
+    private var patientListView: some View {
+        List(filteredPatients, id: \.objectID, selection: $selectedPatient) { patient in
+            NavigationLink(destination: PatientDetailView(patient: patient)) {
+                PatientRowView(patient: patient)
+            }
+            .contextMenu {
+                Button(role: .destructive, action: {
+                    deletePatient(patient)
+                }) {
+                    Label("削除", systemImage: "trash")
+                }
+            }
+        }
+        .listStyle(.sidebar)
+    }

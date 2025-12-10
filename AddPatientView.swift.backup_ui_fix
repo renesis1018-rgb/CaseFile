@@ -1,0 +1,332 @@
+import SwiftUI
+import CoreData
+
+struct AddPatientView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    
+    // MARK: - State Properties
+    @State private var patientId: String = ""
+    @State private var age: String = ""
+    @State private var gender: String = "女性"
+    @State private var name: String = ""
+    @State private var contactInfo: String = ""
+    @State private var notes: String = ""
+    
+    @State private var showAlert = false
+    @State private var alertMessage = ""
+    
+    // MARK: - Validation
+    private var isFormValid: Bool {
+        !patientId.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !age.isEmpty &&
+        isValidAge
+    }
+    
+    private var isValidAge: Bool {
+        guard let ageValue = Int(age) else { return false }
+        return ageValue >= 0 && ageValue <= 150
+    }
+    
+    // MARK: - Body
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                // Header
+                headerSection
+                
+                // Form Content
+                VStack(spacing: 24) {
+                    // Basic Information Section
+                    basicInfoSection
+                    
+                    // Contact & Notes Section
+                    contactNotesSection
+                }
+                .padding(24)
+            }
+        }
+        .frame(minWidth: 500, minHeight: 600)
+        .alert("エラー", isPresented: $showAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(alertMessage)
+        }
+    }
+    
+    // MARK: - Header Section
+    private var headerSection: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("新規患者登録")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                // Close Button
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("閉じる (Esc)")
+            }
+            .padding(20)
+            
+            Divider()
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    // MARK: - Basic Information Section
+    private var basicInfoSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section Title
+            Text("基本情報")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.primary)
+            
+            VStack(spacing: 16) {
+                // Patient ID (Required)
+                HStack(spacing: 12) {
+                    Text("患者ID")
+                        .frame(width: 100, alignment: .trailing)
+                        .foregroundColor(.primary)
+                    
+                    TextField("必須", text: $patientId)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 300)
+                    
+                    Text("*")
+                        .foregroundColor(.red)
+                        .font(.system(size: 18, weight: .bold))
+                    
+                    Spacer()
+                }
+                
+                // Age (Required)
+                HStack(spacing: 12) {
+                    Text("年齢")
+                        .frame(width: 100, alignment: .trailing)
+                        .foregroundColor(.primary)
+                    
+                    TextField("必須", text: $age)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 100)
+                        .onChange(of: age) { newValue in
+                            // Allow only numbers
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue {
+                                age = filtered
+                            }
+                        }
+                    
+                    Text("歳")
+                        .foregroundColor(.secondary)
+                    
+                    Text("*")
+                        .foregroundColor(.red)
+                        .font(.system(size: 18, weight: .bold))
+                    
+                    if !age.isEmpty && !isValidAge {
+                        Text("⚠️ 0-150の範囲で入力")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                    
+                    Spacer()
+                }
+                
+                // Gender (Required)
+                HStack(spacing: 12) {
+                    Text("性別")
+                        .frame(width: 100, alignment: .trailing)
+                        .foregroundColor(.primary)
+                    
+                    Picker("", selection: $gender) {
+                        Text("女性").tag("女性")
+                        Text("男性").tag("男性")
+                    }
+                    .pickerStyle(.radioGroup)
+                    .frame(maxWidth: 300, alignment: .leading)
+                    
+                    Text("*")
+                        .foregroundColor(.red)
+                        .font(.system(size: 18, weight: .bold))
+                    
+                    Spacer()
+                }
+                
+                // Name (Optional)
+                HStack(spacing: 12) {
+                    Text("氏名")
+                        .frame(width: 100, alignment: .trailing)
+                        .foregroundColor(.primary)
+                    
+                    TextField("任意", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 300)
+                    
+                    Spacer()
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(NSColor.textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+        }
+    }
+    
+    // MARK: - Contact & Notes Section
+    private var contactNotesSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section Title
+            Text("連絡先・備考")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.primary)
+            
+            VStack(spacing: 16) {
+                // Contact Info (Optional)
+                HStack(spacing: 12) {
+                    Text("連絡先")
+                        .frame(width: 100, alignment: .trailing)
+                        .foregroundColor(.primary)
+                    
+                    TextField("電話番号・メールアドレスなど", text: $contactInfo)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 300)
+                    
+                    Spacer()
+                }
+                
+                // Notes (Optional, Multi-line)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text("備考")
+                            .frame(width: 100, alignment: .trailing)
+                            .foregroundColor(.primary)
+                        
+                        Spacer()
+                    }
+                    
+                    HStack(spacing: 12) {
+                        Spacer()
+                            .frame(width: 100)
+                        
+                        TextEditor(text: $notes)
+                            .frame(height: 100)
+                            .font(.body)
+                            .padding(4)
+                            .background(Color(NSColor.textBackgroundColor))
+                            .cornerRadius(4)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                            )
+                        
+                        Spacer()
+                    }
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(NSColor.textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+        }
+    }
+    
+    // MARK: - Action Buttons
+    private var actionButtons: some View {
+        HStack(spacing: 12) {
+            Spacer()
+            
+            // Cancel Button
+            Button(action: { dismiss() }) {
+                Text("キャンセル")
+                    .frame(width: 120)
+                    .padding(.vertical, 8)
+            }
+            .keyboardShortcut(.cancelAction)
+            
+            // Save Button
+            Button(action: savePatient) {
+                Text("保存")
+                    .frame(width: 120)
+                    .padding(.vertical, 8)
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(!isFormValid)
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(20)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    // MARK: - Save Patient
+    private func savePatient() {
+        // Validate form
+        guard isFormValid else {
+            alertMessage = "必須項目を入力してください"
+            showAlert = true
+            return
+        }
+        
+        // Check for duplicate Patient ID
+        let fetchRequest: NSFetchRequest<Patient> = Patient.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "patientId == %@", patientId)
+        
+        do {
+            let existingPatients = try viewContext.fetch(fetchRequest)
+            if !existingPatients.isEmpty {
+                alertMessage = "患者ID「\(patientId)」は既に登録されています"
+                showAlert = true
+                return
+            }
+        } catch {
+            alertMessage = "患者IDの重複チェックに失敗しました: \(error.localizedDescription)"
+            showAlert = true
+            return
+        }
+        
+        // Create new Patient
+        let newPatient = Patient(context: viewContext)
+        newPatient.id = UUID()
+        newPatient.patientId = patientId.trimmingCharacters(in: .whitespaces)
+        newPatient.age = age.isEmpty ? NSNumber(value: 0) : NSNumber(value: Int16(age) ?? 0)
+        newPatient.gender = gender
+        newPatient.name = name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name
+        newPatient.contactInfo = contactInfo.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contactInfo
+        newPatient.notes = notes.trimmingCharacters(in: .whitespaces).isEmpty ? nil : notes
+        newPatient.registeredDate = Date()
+        
+        // Save to Core Data
+        do {
+            try viewContext.save()
+            print("✅ 患者を保存しました: ID=\(patientId)")
+            dismiss()
+        } catch {
+            alertMessage = "保存に失敗しました: \(error.localizedDescription)"
+            showAlert = true
+        }
+    }
+}
+
+// MARK: - Preview
+struct AddPatientView_Previews: PreviewProvider {
+    static var previews: some View {
+        AddPatientView()
+            .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    }
+}

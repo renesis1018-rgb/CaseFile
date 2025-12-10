@@ -1,0 +1,13 @@
+    // MARK: - 基本情報
+    @State private var surgeryDate = Date()
+    @State private var surgeryCategory = "豊胸系"
+    @State private var surgeryType = "脂肪注入"  // 豊胸系の場合は "脂肪注入" or "シリコン"
+    @State private var fatInjectionSubType = "PureGraft"  // 脂肪注入のサブタイプ
+    @State private var notes = ""
+    
+    // MARK: - 術前患者状態
+    @State private var heightCm = ""
+    @State private var bodyWeight = ""
+    @State private var smokingHistory = "Never"  // Never, Ex-smoker, Current
+    @State private var breastfeedingHistory = "0回"  // 0回, 1回, 2回, 3回以上
+    @State private var numberOfProcedures = "1回目"  // 1回目, 2回目, 3回目, 4回目以上

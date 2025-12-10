@@ -1,0 +1,124 @@
+import CoreData
+
+struct Persistence {
+    static let shared = Persistence()
+    
+    let container: NSPersistentContainer
+    
+    init(inMemory: Bool = false) {
+        container = NSPersistentContainer(name: "CaseFile")
+        
+        if inMemory {
+            container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
+        }
+        
+        // Core Data の設定
+        let description = container.persistentStoreDescriptions.first
+        description?.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+        description?.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+        
+        container.loadPersistentStores { description, error in
+            if let error = error {
+                fatalError("Core Data store failed to load: \(error.localizedDescription)")
+            }
+        }
+        
+        container.viewContext.automaticallyMergesChangesFromParent = true
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+    }
+    
+    // 患者を保存
+    func savePatient(
+        context: NSManagedObjectContext,
+        name: String,
+        age: Int,
+        gender: String,
+        contactInfo: String?
+    ) -> Patient {
+        let patient = Patient(context: context)
+        patient.id = UUID()
+        patient.name = name
+        patient.age = Int16(age)
+        patient.gender = gender
+        patient.contactInfo = contactInfo
+        patient.registeredDate = Date()
+        
+        do {
+            try context.save()
+            print("✅ 患者保存成功: \(name)")
+            return patient
+        } catch {
+            fatalError("患者保存失敗: \(error)")
+        }
+    }
+    
+    // 手術を保存（術式対応）
+    func saveSurgery(
+        context: NSManagedObjectContext,
+        patient: Patient,
+        surgeryDate: Date,
+        surgeryCategory: String,
+        surgeryType: String,
+        vaserUsed: Bool,
+        aquicellUsed: Bool,
+        preOpVectra: Bool,
+        skinLaxity: String?,
+        donorSite: String?,
+        rightBreastVolume: String?,
+        leftBreastVolume: String?,
+        notes: String?
+    ) {
+        let surgery = Surgery(context: context)
+        surgery.id = UUID()
+        surgery.surgeryDate = surgeryDate
+        surgery.surgeryCategory = surgeryCategory
+        surgery.surgeryType = surgeryType
+        surgery.vaserUsed = vaserUsed
+        surgery.aquicellUsed = aquicellUsed
+        surgery.preOpVectra = preOpVectra
+        surgery.skinLaxity = skinLaxity
+        surgery.donorSite = donorSite
+        surgery.rightBreastVolume = rightBreastVolume
+        surgery.leftBreastVolume = leftBreastVolume
+        surgery.notes = notes
+        surgery.patient = patient
+        
+        do {
+            try context.save()
+            print("✅ 手術保存成功: \(surgeryType)")
+        } catch {
+            fatalError("手術保存失敗: \(error)")
+        }
+    }
+    
+    // フォローアップを保存
+    func saveFollowUp(
+        context: NSManagedObjectContext,
+        surgery: Surgery,
+        timing: String,
+        measurementDate: Date,
+        vectraPerformed: Bool,
+        bodyWeight: Double?,
+        smokingStatus: String?,
+        breastQScore: Int?,
+        notes: String?
+    ) {
+        let followUp = FollowUp(context: context)
+        followUp.id = UUID()
+        followUp.timing = timing
+        followUp.measurementDate = measurementDate
+        followUp.vectraPerformed = vectraPerformed
+        followUp.bodyWeight = bodyWeight ?? 0
+        followUp.smokingStatus = smokingStatus
+        followUp.breastQScore = Int16(breastQScore ?? 0)
+        followUp.notes = notes
+        followUp.surgery = surgery
+        
+        do {
+            try context.save()
+            print("✅ フォローアップ保存成功")
+        } catch {
+            fatalError("フォローアップ保存失敗: \(error)")
+        }
+    }
+}

@@ -1,0 +1,309 @@
+import SwiftUI
+import CoreData
+import AppKit
+import UniformTypeIdentifiers
+
+struct PhotoViewerView: View {
+    let photos: [Photo]
+    let initialIndex: Int
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var currentIndex: Int
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    @FocusState private var isFocused: Bool
+    
+    init(photos: [Photo], initialIndex: Int) {
+        self.photos = photos
+        self.initialIndex = initialIndex
+        _currentIndex = State(initialValue: initialIndex)
+    }
+    
+    var currentPhoto: Photo {
+        photos[currentIndex]
+    }
+    
+    var body: some View {
+        ZStack {
+            // 背景
+            Color.black.opacity(0.95)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // ヘッダー
+                HStack {
+                    // 前の写真
+                    Button(action: previousPhoto) {
+                        Image(systemName: "chevron.left.circle.fill")
+                            .font(.system(size: 32))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.white)
+                    .disabled(currentIndex == 0)
+                    .opacity(currentIndex == 0 ? 0.3 : 1.0)
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                    
+                    Spacer()
+                    
+                    // 写真情報
+                    VStack(spacing: 5) {
+                        Text("\(currentPhoto.angle ?? "不明") | \(currentPhoto.timing ?? "不明")")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        Text("\(currentIndex + 1) / \(photos.count)")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    
+                    Spacer()
+                    
+                    // 次の写真
+                    Button(action: nextPhoto) {
+                        Image(systemName: "chevron.right.circle.fill")
+                            .font(.system(size: 32))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.white)
+                    .disabled(currentIndex == photos.count - 1)
+                    .opacity(currentIndex == photos.count - 1 ? 0.3 : 1.0)
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                    
+                    Spacer().frame(width: 20)
+                    
+                    // 閉じるボタン
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 32))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.white)
+                    .keyboardShortcut(.escape, modifiers: [])
+                }
+                .padding()
+                .background(Color.black.opacity(0.5))
+                
+                // 写真表示エリア（修正：適切なサイズに制限）
+                GeometryReader { geometry in
+                    if let imageData = currentPhoto.imageData,
+                       let nsImage = NSImage(data: imageData),
+                       let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                        
+                        ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                            Image(decorative: cgImage, scale: 1.0)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: geometry.size.width * 0.9, height: geometry.size.height * 0.9)
+                                .scaleEffect(zoomScale)
+                                .onDrag {
+                                    return createDragItem(imageData: imageData)
+                                }
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        
+                    } else {
+                        VStack {
+                            Image(systemName: "photo")
+                                .font(.system(size: 100))
+                                .foregroundColor(.white.opacity(0.3))
+                            Text("画像を読み込めません")
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                
+                // フッター（操作ボタン）
+                HStack(spacing: 20) {
+                    // ズームアウト
+                    Button(action: { zoomOut() }) {
+                        HStack {
+                            Image(systemName: "minus.magnifyingglass")
+                            Text("縮小")
+                        }
+                    }
+                    .disabled(zoomScale <= 0.5)
+                    
+                    // ズーム表示
+                    Text("\(Int(zoomScale * 100))%")
+                        .foregroundColor(.white)
+                        .frame(width: 60)
+                        .padding(6)
+                        .background(Color.white.opacity(0.2))
+                        .cornerRadius(6)
+                    
+                    // ズームリセット
+                    Button(action: { withAnimation { zoomScale = 1.0 } }) {
+                        Text("リセット")
+                    }
+                    .disabled(zoomScale == 1.0)
+                    
+                    // ズームイン
+                    Button(action: { zoomIn() }) {
+                        HStack {
+                            Image(systemName: "plus.magnifyingglass")
+                            Text("拡大")
+                        }
+                    }
+                    .disabled(zoomScale >= 3.0)
+                    
+                    Divider()
+                        .frame(height: 20)
+                        .background(Color.white)
+                    
+                    // リンクコピー
+                    Button(action: { copyImageLink() }) {
+                        HStack {
+                            Image(systemName: "link")
+                            Text("情報コピー")
+                        }
+                    }
+                    
+                    // 画像をファイルとして保存
+                    Button(action: { saveImageToFile() }) {
+                        HStack {
+                            Image(systemName: "square.and.arrow.down")
+                            Text("保存")
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+                .padding()
+                .background(Color.black.opacity(0.5))
+            }
+            
+            // トースト通知
+            if showToast {
+                VStack {
+                    Text(toastMessage)
+                        .padding()
+                        .background(Color.black.opacity(0.8))
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                        .padding(.top, 80)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .frame(width: 1000, height: 800)
+        .focusable()
+        .focused($isFocused)
+        .onAppear {
+            isFocused = true
+        }
+    }
+    
+    // MARK: - Functions
+    
+    private func previousPhoto() {
+        if currentIndex > 0 {
+            withAnimation {
+                currentIndex -= 1
+                zoomScale = 1.0
+            }
+        }
+    }
+    
+    private func nextPhoto() {
+        if currentIndex < photos.count - 1 {
+            withAnimation {
+                currentIndex += 1
+                zoomScale = 1.0
+            }
+        }
+    }
+    
+    private func zoomIn() {
+        withAnimation {
+            zoomScale = min(zoomScale + 0.5, 3.0)
+        }
+    }
+    
+    private func zoomOut() {
+        withAnimation {
+            zoomScale = max(zoomScale - 0.5, 0.5)
+        }
+    }
+    
+    private func createDragItem(imageData: Data) -> NSItemProvider {
+        let fileName = generateFileName()
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        do {
+            try imageData.write(to: tempURL)
+            let provider = NSItemProvider(contentsOf: tempURL)!
+            showToastMessage("📎 ドラッグして他のアプリに貼り付けできます")
+            return provider
+        } catch {
+            print("❌ ドラッグアイテム作成エラー: \(error)")
+            return NSItemProvider()
+        }
+    }
+    
+    private func generateFileName() -> String {
+        let timing = currentPhoto.timing ?? "unknown"
+        let angle = currentPhoto.angle ?? "unknown"
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let dateString = currentPhoto.exifDate.map { dateFormatter.string(from: $0) } ?? "nodate"
+        
+        return "photo_\(timing)_\(angle)_\(dateString).jpg"
+    }
+    
+    private func saveImageToFile() {
+        guard let imageData = currentPhoto.imageData else { return }
+        
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = generateFileName()
+        panel.allowedContentTypes = [.jpeg]
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try imageData.write(to: url)
+                showToastMessage("✅ 画像を保存しました")
+            } catch {
+                showToastMessage("❌ 保存に失敗しました")
+            }
+        }
+    }
+    
+    private func copyImageLink() {
+        let info = """
+        時期: \(currentPhoto.timing ?? "不明")
+        角度: \(currentPhoto.angle ?? "不明")
+        撮影日: \(formatDate(currentPhoto.exifDate))
+        術後経過: \(currentPhoto.daysAfterSurgery)日
+        """
+        
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(info, forType: .string)
+        
+        showToastMessage("📋 写真情報をコピーしました")
+    }
+    
+    private func formatDate(_ date: Date?) -> String {
+        guard let date = date else { return "不明" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
+    }
+    
+    private func showToastMessage(_ message: String) {
+        toastMessage = message
+        withAnimation {
+            showToast = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation {
+                showToast = false
+            }
+        }
+    }
+}

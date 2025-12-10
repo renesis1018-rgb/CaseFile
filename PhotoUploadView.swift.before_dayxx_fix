@@ -1,0 +1,317 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct PhotoUploadView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) var dismiss
+    let surgery: Surgery
+    let onSave: (String) -> Void
+    
+    @State private var selectedImages: [UploadImage] = []
+    @State private var selectedIndices: Set<Int> = []
+    @State private var currentAngle = "正面"
+    @State private var isPreSurgery = false
+    
+    let angleOptions = ["正面", "右側面", "右斜め", "左斜め", "左側面", "その他"]
+    
+    struct UploadImage: Identifiable {
+        let id = UUID()
+        var data: Data
+        var thumbnail: Data?
+        var exifDate: Date?
+        var daysAfter: Int = 0
+        var timing: String = ""
+        var angle: String = ""
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // ヘッダー
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("写真を追加")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        Spacer()
+                        Text("\(selectedImages.count)枚選択中")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    // ファイル選択ボタン
+                    Button {
+                        selectImages()
+                    } label: {
+                        HStack {
+                            Image(systemName: "photo.on.rectangle.angled")
+                            Text("写真を選択...")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundColor(.blue)
+                        .cornerRadius(8)
+                    }
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                
+                Divider()
+                
+                if selectedImages.isEmpty {
+                    // 空の状態
+                    VStack(spacing: 20) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray)
+                        Text("写真を選択してください")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+                        Text("複数枚を一度に選択できます")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack(spacing: 16) {
+                        // サムネイルグリッド
+                        ScrollView {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                                ForEach(Array(selectedImages.enumerated()), id: \.element.id) { index, image in
+                                    ThumbnailItemView(
+                                        image: image,
+                                        index: index,
+                                        isSelected: selectedIndices.contains(index),
+                                        onTap: {
+                                            toggleSelection(index)
+                                        }
+                                    )
+                                }
+                            }
+                            .padding()
+                        }
+                        
+                        Divider()
+                        
+                        // 角度設定エリア
+                        VStack(spacing: 12) {
+                            HStack {
+                                Text("選択中: \(selectedIndices.count)枚")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                
+                                Spacer()
+                                
+                                if !selectedIndices.isEmpty {
+                                    Button("選択解除") {
+                                        selectedIndices.removeAll()
+                                    }
+                                    .font(.caption)
+                                }
+                            }
+                            
+                            HStack {
+                                Text("角度を設定:")
+                                    .font(.subheadline)
+                                
+                                Picker("", selection: $currentAngle) {
+                                    ForEach(angleOptions, id: \.self) { angle in
+                                        Text(angle).tag(angle)
+                                    }
+                                }
+                                .frame(width: 150)
+                                
+                                Button("設定") {
+                                    applyAngle()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(selectedIndices.isEmpty)
+                            }
+                            
+                            Toggle("術前の写真", isOn: $isPreSurgery)
+                                .font(.subheadline)
+                        }
+                        .padding()
+                        .background(Color(NSColor.controlBackgroundColor))
+                    }
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button("キャンセル") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .automatic) {
+                    Button("保存") {
+                        savePhotos()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedImages.isEmpty || selectedImages.contains { $0.angle.isEmpty })
+                }
+            }
+        }
+        .frame(width: 900, height: 700)
+    }
+    
+    // MARK: - ファイル選択
+    func selectImages() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.image]
+        panel.message = "写真を選択してください（複数選択可）"
+        
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                if let data = try? Data(contentsOf: url) {
+                    let exifDate = PhotoManager.shared.extractEXIFDate(from: data)
+                    let thumbnail = PhotoManager.shared.generateThumbnail(from: data, maxSize: 120)
+                    
+                    var daysAfter = 0
+                    var timing = "術前"
+                    
+                    if let exifDate = exifDate, let surgeryDate = surgery.surgeryDate {
+                        daysAfter = PhotoManager.shared.calculateDaysAfterSurgery(
+                            surgeryDate: surgeryDate,
+                            photoDate: exifDate
+                        )
+                        timing = PhotoManager.shared.estimateTiming(daysAfterSurgery: daysAfter)
+                    }
+                    
+                    let uploadImage = UploadImage(
+                        data: data,
+                        thumbnail: thumbnail,
+                        exifDate: exifDate,
+                        daysAfter: daysAfter,
+                        timing: timing
+                    )
+                    
+                    selectedImages.append(uploadImage)
+                }
+            }
+        }
+    }
+    
+    // MARK: - 選択トグル
+    func toggleSelection(_ index: Int) {
+        if selectedIndices.contains(index) {
+            selectedIndices.remove(index)
+        } else {
+            selectedIndices.insert(index)
+        }
+    }
+    
+    // MARK: - 角度を設定
+    func applyAngle() {
+        for index in selectedIndices {
+            if index < selectedImages.count {
+                selectedImages[index].angle = currentAngle
+            }
+        }
+        selectedIndices.removeAll()
+    }
+    
+    // MARK: - 保存
+    func savePhotos() {
+        var count = 0
+        
+        for image in selectedImages {
+            let timing = isPreSurgery ? "術前" : image.timing
+            
+            PhotoManager.shared.savePhoto(
+                context: viewContext,
+                surgery: surgery,
+                imageData: image.data,
+                timing: timing,
+                angle: image.angle,
+                exifDate: image.exifDate,
+                daysAfterSurgery: image.daysAfter,
+                notes: nil
+            )
+            count += 1
+        }
+        
+        onSave("✅ \(count)枚の写真を保存しました")
+        dismiss()
+    }
+}
+
+// MARK: - サムネイル表示
+
+struct ThumbnailItemView: View {
+    let image: PhotoUploadView.UploadImage
+    let index: Int
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            ZStack(alignment: .topLeading) {
+                if let thumbnailData = image.thumbnail,
+                   let nsImage = NSImage(data: thumbnailData) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 120, height: 120)
+                        .clipped()
+                        .cornerRadius(8)
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 120, height: 120)
+                        .cornerRadius(8)
+                }
+                
+                // 選択状態の表示
+                if isSelected {
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 24, height: 24)
+                        .overlay(
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.white)
+                                .font(.caption)
+                        )
+                        .padding(4)
+                }
+                
+                // インデックス番号
+                Text("\(index + 1)")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(4)
+                    .background(Color.black.opacity(0.6))
+                    .cornerRadius(4)
+                    .padding(4)
+                    .offset(x: isSelected ? 30 : 0, y: 0)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+            )
+            .onTapGesture {
+                onTap()
+            }
+            
+            // 角度表示
+            if !image.angle.isEmpty {
+                Text(image.angle)
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.2))
+                    .foregroundColor(.green)
+                    .cornerRadius(4)
+            }
+            
+            // 時期表示
+            Text(image.timing)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+}

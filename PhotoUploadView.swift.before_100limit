@@ -1,0 +1,354 @@
+import SwiftUI
+import CoreData
+import AppKit
+import UniformTypeIdentifiers
+
+struct PhotoUploadView: View {
+    let surgery: Surgery
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var selectedImages: [UploadImage] = []
+    @State private var isProcessing = false
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    // ドラッグ選択用
+    @State private var selectionStart: Int? = nil
+    @State private var currentAngle = "正面"
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // ヘッダー
+            HStack {
+                Text("📸 写真アップロード")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button("キャンセル") {
+                    dismiss()
+                }
+            }
+            .padding()
+            
+            Divider()
+            
+            if selectedImages.isEmpty {
+                // 写真選択エリア
+                VStack(spacing: 20) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 80))
+                        .foregroundColor(.gray)
+                    
+                    Text("写真を選択してください")
+                        .font(.headline)
+                    
+                    Text("一度に最大40枚まで選択できます")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Button("写真を選択") {
+                        selectPhotos()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // 写真プレビュー + 角度設定エリア
+                VStack(spacing: 15) {
+                    // 角度選択 + 情報
+                    HStack {
+                        Text("角度設定:")
+                            .fontWeight(.semibold)
+                        
+                        Picker("角度", selection: $currentAngle) {
+                            Text("正面").tag("正面")
+                            Text("右側面").tag("右側面")
+                            Text("左側面").tag("左側面")
+                            Text("右斜め").tag("右斜め")
+                            Text("左斜め").tag("左斜め")
+                            Text("その他").tag("その他")
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 500)
+                        
+                        Spacer()
+                        
+                        Text("\(selectedImages.count)枚選択中")
+                            .foregroundColor(.secondary)
+                        
+                        Button("一括設定") {
+                            applyAngleToAll()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(.horizontal)
+                    
+                    // ドラッグ選択の説明
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.blue)
+                        Text("Shiftキーを押しながらクリックで範囲選択 → 角度を一括設定できます")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                    
+                    // サムネイルグリッド
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
+                            ForEach(Array(selectedImages.enumerated()), id: \.offset) { index, image in
+                                PhotoThumbnailCell(
+                                    image: image,
+                                    index: index,
+                                    isSelected: image.isSelected,
+                                    onTap: {
+                                        handleTap(index: index)
+                                    }
+                                )
+                            }
+                        }
+                        .padding()
+                    }
+                    
+                    Divider()
+                    
+                    // アクション
+                    HStack {
+                        Button("写真を追加選択") {
+                            selectPhotos()
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Spacer()
+                        
+                        Button("選択中の写真に角度を設定") {
+                            applyAngleToSelected()
+                        }
+                        .disabled(selectedImages.filter(\.isSelected).isEmpty)
+                        .buttonStyle(.borderedProminent)
+                        
+                        Button("保存") {
+                            savePhotos()
+                        }
+                        .disabled(isProcessing)
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding()
+                }
+            }
+        }
+        .frame(width: 900, height: 700)
+        .overlay(
+            Group {
+                if showToast {
+                    VStack {
+                        Text(toastMessage)
+                            .padding()
+                            .background(Color.black.opacity(0.8))
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                            .padding(.top, 50)
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+        )
+    }
+    
+    // MARK: - Functions
+    
+    private func selectPhotos() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.image]
+        
+        if panel.runModal() == .OK {
+            let urls = panel.urls
+            for url in urls {
+                if let imageData = try? Data(contentsOf: url),
+                   let nsImage = NSImage(data: imageData) {
+                    
+                    var timing = "術前"
+                    var daysAfter: Int = 0
+                    var exifDate: Date? = nil
+                    
+                    // EXIF日付を抽出
+                    if let extractedDate = PhotoManager.shared.extractEXIFDate(from: imageData) {
+                        exifDate = extractedDate
+                        
+                        // 手術日との経過日数を計算
+                        if let surgeryDate = surgery.surgeryDate {
+                            daysAfter = PhotoManager.shared.calculateDaysAfterSurgery(
+                                surgeryDate: surgeryDate,
+                                photoDate: extractedDate
+                            )
+                            
+                            // 時期を推定
+                            timing = PhotoManager.shared.estimateTiming(from: daysAfter)
+                            
+                            print("📅 写真読込: EXIF=\(extractedDate), 手術日=\(surgeryDate), 経過=\(daysAfter)日, 時期=\(timing)")
+                        }
+                    } else {
+                        print("⚠️ EXIF日付なし → 術前として扱います")
+                    }
+                    
+                    let uploadImage = UploadImage(
+                        nsImage: nsImage,
+                        imageData: imageData,
+                        angle: currentAngle,
+                        timing: timing,
+                        exifDate: exifDate,
+                        daysAfterSurgery: daysAfter
+                    )
+                    
+                    selectedImages.append(uploadImage)
+                }
+            }
+            
+            showToastMessage("📸 \(urls.count)枚の写真を読み込みました")
+        }
+    }
+    
+    private func handleTap(index: Int) {
+        let isShiftPressed = NSEvent.modifierFlags.contains(.shift)
+        
+        if isShiftPressed {
+            // Shift+クリック: 範囲選択
+            if let start = selectionStart {
+                let range = min(start, index)...max(start, index)
+                for i in range {
+                    selectedImages[i].isSelected = true
+                }
+                selectionStart = nil
+            } else {
+                selectionStart = index
+                selectedImages[index].isSelected.toggle()
+            }
+        } else {
+            // 通常クリック: 単一選択トグル
+            selectedImages[index].isSelected.toggle()
+            selectionStart = index
+        }
+    }
+    
+    private func applyAngleToSelected() {
+        for i in selectedImages.indices {
+            if selectedImages[i].isSelected {
+                selectedImages[i].angle = currentAngle
+                selectedImages[i].isSelected = false
+            }
+        }
+        selectionStart = nil
+        showToastMessage("✅ 選択した写真に「\(currentAngle)」を設定しました")
+    }
+    
+    private func applyAngleToAll() {
+        for i in selectedImages.indices {
+            selectedImages[i].angle = currentAngle
+        }
+        showToastMessage("✅ 全ての写真に「\(currentAngle)」を設定しました")
+    }
+    
+    private func savePhotos() {
+        isProcessing = true
+        
+        for image in selectedImages {
+            PhotoManager.shared.savePhoto(
+                context: viewContext,
+                surgery: surgery,
+                imageData: image.imageData,
+                angle: image.angle,
+                notes: nil,
+                surgeryDate: surgery.surgeryDate ?? Date()
+            )
+        }
+        
+        isProcessing = false
+        showToastMessage("✅ \(selectedImages.count)枚の写真を保存しました")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            dismiss()
+        }
+    }
+    
+    private func showToastMessage(_ message: String) {
+        toastMessage = message
+        withAnimation {
+            showToast = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation {
+                showToast = false
+            }
+        }
+    }
+}
+
+// MARK: - UploadImage Model
+
+struct UploadImage: Identifiable {
+    let id = UUID()
+    let nsImage: NSImage
+    let imageData: Data
+    var angle: String
+    var timing: String
+    var exifDate: Date?
+    var daysAfterSurgery: Int
+    var notes: String?
+    var isSelected: Bool = false
+}
+
+// MARK: - PhotoThumbnailCell
+
+struct PhotoThumbnailCell: View {
+    let image: UploadImage
+    let index: Int
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 5) {
+            ZStack(alignment: .topLeading) {
+                if let cgImage = image.nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                    Image(decorative: cgImage, scale: 1.0)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 150, height: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(isSelected ? Color.blue : Color.gray.opacity(0.3), lineWidth: isSelected ? 3 : 1)
+                        )
+                }
+                
+                // 選択マーク
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.blue)
+                        .background(Color.white.clipShape(Circle()))
+                        .padding(5)
+                }
+            }
+            .onTapGesture {
+                onTap()
+            }
+            
+            // 角度
+            Text(image.angle)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.blue)
+            
+            // 時期 (Day XX を表示)
+            Text(image.timing)
+                .font(.caption2)
+                .foregroundColor(image.timing == "術前" ? .secondary : .green)
+                .fontWeight(image.timing.starts(with: "Day") ? .semibold : .regular)
+        }
+    }
+}

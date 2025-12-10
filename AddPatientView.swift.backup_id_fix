@@ -1,0 +1,180 @@
+import SwiftUI
+import CoreData
+
+struct AddPatientView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var patientId = ""
+    @State private var name = ""
+    @State private var age = ""
+    @State private var gender = "女性"
+    @State private var contactInfo = ""
+    @State private var notes = ""
+    @State private var registeredDate = Date()
+    
+    @State private var showAlert = false
+    @State private var alertMessage = ""
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("新規患者登録")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    
+                    // 基本情報
+                    GroupBox(label: Label("基本情報", systemImage: "person.fill")) {
+                        VStack(alignment: .leading, spacing: 15) {
+                            // 患者ID
+                            HStack {
+                                Text("患者ID")
+                                    .frame(width: 100, alignment: .trailing)
+                                TextField("患者ID（任意の数字を入力）", text: $patientId)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 300)
+                                    .disabled(true)
+                            }
+                            
+                            // 氏名
+                            HStack {
+                                Text("氏名")
+                                    .frame(width: 100, alignment: .trailing)
+                                    .foregroundColor(.red)
+                                TextField("必須", text: $name)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 300)
+                                    .onChange(of: age) { _ in
+                                        // 年齢が変更されたときの処理
+                                    }
+                            }
+                            
+                            // 年齢
+                            HStack {
+                                Text("年齢")
+                                    .frame(width: 100, alignment: .trailing)
+                                    .foregroundColor(.red)
+                                TextField("0-150", text: $age)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 100)
+                            }
+                            
+                            // 性別
+                            HStack {
+                                Text("性別")
+                                    .frame(width: 100, alignment: .trailing)
+                                    .foregroundColor(.red)
+                                Picker("", selection: $gender) {
+                                    Text("女性").tag("女性")
+                                    Text("男性").tag("男性")
+                                }
+                                .pickerStyle(.radioGroup)
+                                .frame(maxWidth: 300, alignment: .leading)
+                            }
+                            
+                            // 登録日
+                            HStack {
+                                Text("登録日")
+                                    .frame(width: 100, alignment: .trailing)
+                                DatePicker("", selection: $registeredDate, displayedComponents: .date)
+                                    .datePickerStyle(.field)
+                                    .frame(maxWidth: 300)
+                            }
+                        }
+                        .padding()
+                    }
+                    
+                    // 連絡先・備考
+                    GroupBox(label: Label("連絡先・備考", systemImage: "envelope.fill")) {
+                        VStack(alignment: .leading, spacing: 15) {
+                            // 連絡先
+                            HStack(alignment: .top) {
+                                Text("連絡先")
+                                    .frame(width: 100, alignment: .trailing)
+                                TextField("電話番号・メールアドレスなど", text: $contactInfo)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 300)
+                            }
+                            
+                            // 備考
+                            HStack(alignment: .top) {
+                                Text("備考")
+                                    .frame(width: 100, alignment: .trailing)
+                                TextEditor(text: $notes)
+                                    .frame(maxWidth: 300, minHeight: 100)
+                                    .border(Color.gray.opacity(0.3))
+                            }
+                        }
+                        .padding()
+                    }
+                    
+                    // 保存ボタン
+                    HStack {
+                        Spacer()
+                        Button("キャンセル") {
+                            dismiss()
+                        }
+                        .keyboardShortcut(.cancelAction)
+                        
+                        Button("保存") {
+                            savePatient()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                        Spacer()
+                    }
+                    .padding(.top)
+                }
+                .padding(24)
+            }
+            .frame(minWidth: 700, idealWidth: 800, minHeight: 650)
+            .navigationTitle("")
+        }
+        .alert("エラー", isPresented: $showAlert) {
+            Button("OK") { }
+        } message: {
+            Text(alertMessage)
+        }
+    }
+    
+    private func savePatient() {
+        // バリデーション
+        guard !name.isEmpty else {
+            alertMessage = "氏名を入力してください"
+            showAlert = true
+            return
+        }
+        
+        guard let ageValue = Int16(age), ageValue > 0, ageValue <= 150 else {
+            alertMessage = "年齢を正しく入力してください（1-150）"
+            showAlert = true
+            return
+        }
+        
+        // 新規患者作成
+        let newPatient = Patient(context: viewContext)
+        newPatient.id = UUID()
+        newPatient.patientId = patientId.isEmpty ? "P\(Int.random(in: 10000...99999))" : patientId
+        newPatient.name = name
+        newPatient.age = age.isEmpty ? NSNumber(value: 0) : NSNumber(value: Int16(age) ?? 0)
+        newPatient.gender = gender
+        newPatient.contactInfo = contactInfo.isEmpty ? nil : contactInfo
+        newPatient.notes = notes.isEmpty ? nil : notes
+        newPatient.registeredDate = registeredDate
+        
+        // 保存
+        do {
+            try viewContext.save()
+            dismiss()
+        } catch {
+            alertMessage = "保存に失敗しました: \(error.localizedDescription)"
+            showAlert = true
+        }
+    }
+}
+
+#Preview {
+    AddPatientView()
+        .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+}
