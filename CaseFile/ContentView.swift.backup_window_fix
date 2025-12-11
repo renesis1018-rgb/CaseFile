@@ -1,0 +1,1368 @@
+import SwiftUI
+import CoreData
+
+struct ContentView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(keyPath: \Patient.registeredDate, ascending: false)],
+        animation: .default)
+    private var patients: FetchedResults<Patient>
+    
+    @State private var searchText = ""
+    @State private var showAddPatient = false
+    @State private var selectedSortOption: SortOption = .registeredDate
+    @State private var showAdvancedSearch = false
+    @State private var filterCategory: String? = nil
+    @State private var filterType: String? = nil
+    
+    enum SortOption: String, CaseIterable, Identifiable {
+        case registeredDate = "登録日"
+        case patientId = "患者ID"
+        case age = "年齢"
+        
+        var id: String { rawValue }
+    }
+    
+    var filteredPatients: [Patient] {
+        var result = patients.filter { patient in
+            if searchText.isEmpty {
+                return true
+            }
+            return patient.patientId?.localizedCaseInsensitiveContains(searchText) ?? false
+        }
+        
+        // 術式カテゴリでフィルタ
+        if let category = filterCategory {
+            result = result.filter { patient in
+                patient.surgeries?.contains(where: { surgery in
+                    (surgery as? Surgery)?.surgeryCategory == category
+                }) ?? false
+            }
+        }
+        
+        // 術式タイプでフィルタ
+        if let type = filterType {
+            result = result.filter { patient in
+                patient.surgeries?.contains(where: { surgery in
+                    (surgery as? Surgery)?.surgeryType == type
+                }) ?? false
+            }
+        }
+        
+        // ソート
+        switch selectedSortOption {
+        case .registeredDate:
+            return result.sorted { ($0.registeredDate ?? Date()) > ($1.registeredDate ?? Date()) }
+        case .patientId:
+            return result.sorted { ($0.patientId ?? "") < ($1.patientId ?? "") }
+        case .age:
+            return result.sorted { $0.age > $1.age }
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // ヘッダー
+                HStack {
+                    Text("症例管理")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    
+                    Spacer()
+                    
+                    Button(action: { showAddPatient = true }) {
+                        Label("新規患者登録", systemImage: "plus.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+                
+                Divider()
+                
+                // 検索・フィルタ・ソート
+                VStack(spacing: 10) {
+                    HStack {
+                        // 検索バー
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.gray)
+                            TextField("患者IDで検索", text: $searchText)
+                            if !searchText.isEmpty {
+                                Button(action: { searchText = "" }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.gray)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(8)
+                        
+                        // ソート
+                        Picker("並び替え", selection: $selectedSortOption) {
+                            ForEach(SortOption.allCases) { option in
+                                Text(option.rawValue).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 120)
+                        
+                        // 高度な検索
+                        Button(action: { showAdvancedSearch.toggle() }) {
+                            Label("フィルタ", systemImage: "line.3.horizontal.decrease.circle")
+                        }
+                    }
+                    
+                    // フィルタバッジ
+                    if filterCategory != nil || filterType != nil {
+                        HStack {
+                            if let category = filterCategory {
+                                FilterBadge(title: category) {
+                                    filterCategory = nil
+                                }
+                            }
+                            if let type = filterType {
+                                FilterBadge(title: type) {
+                                    filterType = nil
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                
+                Divider()
+                
+                // 患者リスト
+                if filteredPatients.isEmpty {
+                    VStack(spacing: 20) {
+                        Image(systemName: "person.3")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray)
+                        Text(searchText.isEmpty ? "患者が登録されていません" : "検索結果がありません")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(filteredPatients, id: \.self) { patient in
+                            NavigationLink(destination: PatientDetailView(patient: patient)) {
+                                PatientRow(patient: patient)
+                            }
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showAddPatient) {
+                AddPatientView()
+            }
+            .sheet(isPresented: $showAdvancedSearch) {
+                AdvancedSearchView(
+                    filterCategory: $filterCategory,
+                    filterType: $filterType
+                )
+            }
+            
+            // 初期表示
+            Text("患者を選択してください")
+                .font(.title)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+// MARK: - FilterBadge
+
+struct FilterBadge: View {
+    let title: String
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.caption)
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.blue.opacity(0.2))
+        .cornerRadius(15)
+    }
+}
+
+// MARK: - PatientRow
+
+struct PatientRow: View {
+    let patient: Patient
+    
+    var surgeryCount: Int {
+        patient.surgeries?.count ?? 0
+    }
+    
+    var latestSurgery: Surgery? {
+        let surgeries = (patient.surgeries?.allObjects as? [Surgery]) ?? []
+        return surgeries.sorted { ($0.surgeryDate ?? Date()) > ($1.surgeryDate ?? Date()) }.first
+    }
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 5) {
+                // 患者IDを表示
+                HStack {
+                    Text("患者ID:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(patient.patientId ?? "不明")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                }
+                
+                HStack(spacing: 15) {
+                    Label("\(patient.age)歳", systemImage: "person.fill")
+                    Label(patient.gender ?? "不明", systemImage: "info.circle")
+                    
+                    if let surgery = latestSurgery {
+                        Label(surgery.surgeryType ?? "不明", systemImage: "stethoscope")
+                            .foregroundColor(.blue)
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 5) {
+                Text("\(surgeryCount)件の手術")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                if let date = patient.registeredDate {
+                    Text(date, style: .date)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+// MARK: - AdvancedSearchView
+
+struct AdvancedSearchView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var filterCategory: String?
+    @Binding var filterType: String?
+    
+    @State private var selectedCategory: SurgeryCategory?
+    @State private var selectedType: SurgeryType?
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            HStack {
+                Text("高度な検索")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button("閉じる") { dismiss() }
+            }
+            .padding()
+            
+            Divider()
+            
+            Form {
+                Section("術式カテゴリ") {
+                    Picker("カテゴリ", selection: $selectedCategory) {
+                        Text("すべて").tag(nil as SurgeryCategory?)
+                        ForEach(SurgeryCategory.allCases, id: \.self) { category in
+                            Text(category.displayName).tag(category as SurgeryCategory?)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                
+                if let category = selectedCategory {
+                    Section("術式") {
+                        Picker("術式", selection: $selectedType) {
+                            Text("すべて").tag(nil as SurgeryType?)
+                            ForEach(SurgeryType.types(for: category), id: \.self) { type in
+                                Text(type.displayName).tag(type as SurgeryType?)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding()
+            
+            Spacer()
+            
+            HStack {
+                Button("リセット") {
+                    selectedCategory = nil
+                    selectedType = nil
+                    filterCategory = nil
+                    filterType = nil
+                }
+                .buttonStyle(.bordered)
+                
+                Spacer()
+                
+                Button("適用") {
+                    filterCategory = selectedCategory?.rawValue
+                    filterType = selectedType?.rawValue
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        }
+        .frame(width: 500, height: 400)
+    }
+}
+
+// MARK: - PatientDetailView
+
+struct PatientDetailView: View {
+    let patient: Patient
+    @Environment(\.managedObjectContext) private var viewContext
+    
+    @State private var showAddSurgery = false
+    @State private var showEditPatient = false
+    
+    var surgeries: [Surgery] {
+        let surgerySet = patient.surgeries as? Set<Surgery> ?? []
+        return surgerySet.sorted { ($0.surgeryDate ?? Date()) > ($1.surgeryDate ?? Date()) }
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // ヘッダー
+            HStack {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("患者ID:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(patient.patientId ?? "不明")
+                            .font(.title)
+                            .fontWeight(.bold)
+                    }
+                    
+                    HStack(spacing: 20) {
+                        Label("\(patient.age)歳", systemImage: "person.fill")
+                        Label(patient.gender ?? "不明", systemImage: "info.circle")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Button(action: { showEditPatient = true }) {
+                    Label("編集", systemImage: "pencil")
+                }
+                .buttonStyle(.bordered)
+                
+                Button(action: { showAddSurgery = true }) {
+                    Label("手術を追加", systemImage: "plus.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            
+            Divider()
+            
+            // 手術リスト
+            if surgeries.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "stethoscope")
+                        .font(.system(size: 60))
+                        .foregroundColor(.gray)
+                    Text("手術記録がありません")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    Button("手術を追加") {
+                        showAddSurgery = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 15) {
+                        ForEach(surgeries, id: \.self) { surgery in
+                            NavigationLink(destination: SurgeryDetailView(surgery: surgery)) {
+                            SurgeryCard(surgery: surgery)
+                        }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+        .sheet(isPresented: $showAddSurgery) {
+            AddSurgeryView(patient: patient)
+        }
+        .sheet(isPresented: $showEditPatient) {
+            EditPatientView(patient: patient)
+        }
+    }
+}
+
+// MARK: - InfoRow
+
+struct InfoRow: View {
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Text(label)
+                .fontWeight(.semibold)
+                .frame(width: 120, alignment: .leading)
+            Text(value)
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+    }
+}
+
+
+// MARK: - Surgery Card View
+struct SurgeryCard: View {
+    let surgery: Surgery
+    @State private var showEditSheet = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(surgery.surgeryType ?? "不明な術式")
+                    .font(.headline)
+                Spacer()
+                Button(action: { showEditSheet = true }) {
+                    Image(systemName: "pencil")
+                        .foregroundColor(.blue)
+                }
+            }
+            
+            Text("手術日: \(formattedDate(surgery.surgeryDate ?? Date()))")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            
+            if let category = surgery.surgeryCategory {
+                Text("カテゴリ: \(category)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            // VASER / Aquicell 表示
+            if surgery.surgeryType == "脂肪豊胸" {
+                HStack(spacing: 12) {
+                    if surgery.vaserUsed {
+                        Label("VASER使用", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    }
+                    if surgery.aquicellUsed {
+                        Label("Aquicell使用", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .sheet(isPresented: $showEditSheet) {
+            EditSurgeryView(surgery: surgery)
+        }
+    }
+    
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Follow-Up Card View
+struct FollowUpCard: View {
+    let followUp: FollowUp
+    @State private var showEditSheet = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(followUp.timing ?? "不明")
+                    .font(.headline)
+                Spacer()
+                Button(action: { showEditSheet = true }) {
+                    Image(systemName: "pencil")
+                        .foregroundColor(.blue)
+                }
+            }
+            
+            Text("測定日: \(formattedDate(followUp.measurementDate ?? Date()))")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            
+            if followUp.breastQScore > 0 {
+                Text("Breast-Q: \(followUp.breastQScore)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .sheet(isPresented: $showEditSheet) {
+            EditFollowUpView(followUp: followUp)
+        }
+    }
+    
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Add Patient View
+struct AddPatientView: View {
+    @Environment(\.presentationMode) var presentationMode
+    
+    @State private var patientId: String = ""
+    @State private var age: String = ""
+    @State private var gender: String = "女性"
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    let genderOptions = ["女性", "男性", "その他"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("新規患者登録")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .imageScale(.large)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            // Form Content
+            Form {
+                Section(header: Text("基本情報")) {
+                    TextField("電子カルテID", text: $patientId)
+                    TextField("年齢", text: $age)
+                        .frame(width: 100)
+                    Picker("性別", selection: $gender) {
+                        ForEach(genderOptions, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            
+            // Footer
+            HStack {
+                Spacer()
+                Button("キャンセル") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Button("登録") {
+                    savePatient()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(patientId.isEmpty || age.isEmpty)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+        }
+        .frame(width: 500, height: 350)
+        .overlay(
+            ToastView(message: toastMessage, isShowing: $showToast)
+                .animation(.easeInOut, value: showToast)
+            , alignment: .top
+        )
+    }
+    
+    private func savePatient() {
+        guard let ageInt = Int(age) else {
+            toastMessage = "年齢は数値で入力してください"
+            showToast = true
+            return
+        }
+        
+        let context = Persistence.shared.container.viewContext
+        _ = Persistence.shared.savePatient(
+            context: context,
+            patientId: patientId,
+            age: ageInt,
+            gender: gender
+        )
+        
+        toastMessage = "患者を登録しました"
+        showToast = true
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            presentationMode.wrappedValue.dismiss()
+        }
+    }
+}
+
+// MARK: - Edit Patient View
+struct EditPatientView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var patient: Patient
+    
+    @State private var patientId: String = ""
+    @State private var age: String = ""
+    @State private var gender: String = "女性"
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    let genderOptions = ["女性", "男性", "その他"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("患者情報編集")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .imageScale(.large)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            // Form Content
+            Form {
+                Section(header: Text("基本情報")) {
+                    TextField("電子カルテID", text: $patientId)
+                    TextField("年齢", text: $age)
+                        .frame(width: 100)
+                    Picker("性別", selection: $gender) {
+                        ForEach(genderOptions, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            
+            // Footer
+            HStack {
+                Spacer()
+                Button("キャンセル") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Button("保存") {
+                    savePatient()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(patientId.isEmpty || age.isEmpty)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+        }
+        .frame(width: 500, height: 350)
+        .onAppear {
+            patientId = patient.patientId ?? ""
+            age = String(patient.age)
+            gender = patient.gender ?? "女性"
+        }
+        .overlay(
+            ToastView(message: toastMessage, isShowing: $showToast)
+                .animation(.easeInOut, value: showToast)
+            , alignment: .top
+        )
+    }
+    
+    private func savePatient() {
+        guard let ageInt = Int(age) else {
+            toastMessage = "年齢は数値で入力してください"
+            showToast = true
+            return
+        }
+        
+        patient.patientId = patientId
+        patient.age = Int16(ageInt)
+        patient.gender = gender
+        
+        do {
+            try Persistence.shared.container.viewContext.save()
+            toastMessage = "患者情報を更新しました"
+            showToast = true
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                presentationMode.wrappedValue.dismiss()
+            }
+        } catch {
+            toastMessage = "保存に失敗しました"
+            showToast = true
+        }
+    }
+}
+
+
+// MARK: - Add Surgery View
+struct AddSurgeryView: View {
+    @Environment(\.presentationMode) var presentationMode
+    let patient: Patient
+    
+    @State private var surgeryDate = Date()
+    @State private var surgeryCategory: SurgeryCategory = .breastAugmentation
+    @State private var surgeryType: SurgeryType = .fatGraft
+    @State private var vaserUsed = false
+    @State private var aquicellUsed = false
+    @State private var donorSite = "腹部"
+    @State private var donorSiteOther = ""
+    @State private var rightBreastVolume = ""
+    @State private var leftBreastVolume = ""
+    @State private var preOpVectra = false
+    @State private var skinLaxity = "正常"
+    @State private var notes = ""
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    let donorSiteOptions = ["腹部", "大腿", "臀部", "その他"]
+    let skinLaxityOptions = ["正常", "軽度", "中等度", "高度"]
+    
+    var availableSurgeryTypes: [SurgeryType] {
+        SurgeryType.allCases.filter { $0.category == surgeryCategory }
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("新規手術登録")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .imageScale(.large)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            // Form Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // 術式選択
+                    GroupBox(label: Text("術式選択").font(.headline)) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Picker("術式カテゴリ", selection: $surgeryCategory) {
+                                ForEach(SurgeryCategory.allCases, id: \.self) { category in
+                                    Text(category.rawValue).tag(category)
+                                }
+                            }
+                            .onChange(of: surgeryCategory) { newCategory in
+                                if let firstType = SurgeryType.allCases.first(where: { $0.category == newCategory }) {
+                                    surgeryType = firstType
+                                }
+                            }
+                            
+                            Picker("術式", selection: $surgeryType) {
+                                ForEach(availableSurgeryTypes, id: \.self) { type in
+                                    Text(type.rawValue).tag(type)
+                                }
+                            }
+                        }
+                        .padding(8)
+                    }
+                    
+                    // 手術日
+                    GroupBox(label: Text("手術日").font(.headline)) {
+                        DatePicker("", selection: $surgeryDate, displayedComponents: .date)
+                            .datePickerStyle(.field)
+                            .padding(8)
+                    }
+                    
+                    // 脂肪豊胸固有データ
+                    if surgeryType == .fatGraft {
+                        GroupBox(label: Text("脂肪豊胸データ").font(.headline)) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("VASER使用", isOn: $vaserUsed)
+                                Toggle("Aquicell使用", isOn: $aquicellUsed)
+                                
+                                Picker("採取部位", selection: $donorSite) {
+                                    ForEach(donorSiteOptions, id: \.self) { site in
+                                        Text(site).tag(site)
+                                    }
+                                }
+                                
+                                if donorSite == "その他" {
+                                    TextField("採取部位（その他）", text: $donorSiteOther)
+                                }
+                                
+                                HStack {
+                                    Text("注入量")
+                                    TextField("右胸 (cc)", text: $rightBreastVolume)
+                                        .frame(width: 100)
+                                    TextField("左胸 (cc)", text: $leftBreastVolume)
+                                        .frame(width: 100)
+                                }
+                                
+                                Toggle("術前Vectra撮影", isOn: $preOpVectra)
+                                
+                                Picker("皮膚弛緩度", selection: $skinLaxity) {
+                                    ForEach(skinLaxityOptions, id: \.self) { laxity in
+                                        Text(laxity).tag(laxity)
+                                    }
+                                }
+                            }
+                            .padding(8)
+                        }
+                    }
+                    
+                    // 備考
+                    GroupBox(label: Text("備考").font(.headline)) {
+                        TextEditor(text: $notes)
+                            .frame(height: 80)
+                            .padding(8)
+                    }
+                }
+                .padding()
+            }
+            
+            // Footer
+            HStack {
+                Spacer()
+                Button("キャンセル") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Button("登録") {
+                    saveSurgery()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+        }
+        .frame(width: 700, height: 600)
+        .overlay(
+            ToastView(message: toastMessage, isShowing: $showToast)
+                .animation(.easeInOut, value: showToast)
+            , alignment: .top
+        )
+    }
+    
+    private func saveSurgery() {
+        let context = Persistence.shared.container.viewContext
+        _ = Persistence.shared.saveSurgery(
+            context: context,
+            patient: patient,
+            surgeryDate: surgeryDate,
+            surgeryCategory: surgeryCategory.rawValue,
+            surgeryType: surgeryType.rawValue,
+            vaserUsed: vaserUsed,
+            aquicellUsed: aquicellUsed,
+            preOpVectra: preOpVectra,
+            skinLaxity: skinLaxity,
+            donorSite: donorSite == "その他" ? donorSiteOther : donorSite,
+            rightBreastVolume: rightBreastVolume,
+            leftBreastVolume: leftBreastVolume,
+            notes: notes
+        )
+        
+        toastMessage = "手術を登録しました"
+        showToast = true
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            presentationMode.wrappedValue.dismiss()
+        }
+    }
+}
+
+// MARK: - Edit Surgery View
+struct EditSurgeryView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var surgery: Surgery
+    
+    @State private var surgeryDate = Date()
+    @State private var surgeryCategory: SurgeryCategory = .breastAugmentation
+    @State private var surgeryType: SurgeryType = .fatGraft
+    @State private var vaserUsed = false
+    @State private var aquicellUsed = false
+    @State private var donorSite = "腹部"
+    @State private var donorSiteOther = ""
+    @State private var rightBreastVolume = ""
+    @State private var leftBreastVolume = ""
+    @State private var preOpVectra = false
+    @State private var skinLaxity = "正常"
+    @State private var notes = ""
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    let donorSiteOptions = ["腹部", "大腿", "臀部", "その他"]
+    let skinLaxityOptions = ["正常", "軽度", "中等度", "高度"]
+    
+    var availableSurgeryTypes: [SurgeryType] {
+        SurgeryType.allCases.filter { $0.category == surgeryCategory }
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("手術情報編集")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .imageScale(.large)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            // Form Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // 術式選択
+                    GroupBox(label: Text("術式選択").font(.headline)) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Picker("術式カテゴリ", selection: $surgeryCategory) {
+                                ForEach(SurgeryCategory.allCases, id: \.self) { category in
+                                    Text(category.rawValue).tag(category)
+                                }
+                            }
+                            .onChange(of: surgeryCategory) { newCategory in
+                                if let firstType = SurgeryType.allCases.first(where: { $0.category == newCategory }) {
+                                    surgeryType = firstType
+                                }
+                            }
+                            
+                            Picker("術式", selection: $surgeryType) {
+                                ForEach(availableSurgeryTypes, id: \.self) { type in
+                                    Text(type.rawValue).tag(type)
+                                }
+                            }
+                        }
+                        .padding(8)
+                    }
+                    
+                    // 手術日
+                    GroupBox(label: Text("手術日").font(.headline)) {
+                        DatePicker("", selection: $surgeryDate, displayedComponents: .date)
+                            .datePickerStyle(.field)
+                            .padding(8)
+                    }
+                    
+                    // 脂肪豊胸固有データ
+                    if surgeryType == .fatGraft {
+                        GroupBox(label: Text("脂肪豊胸データ").font(.headline)) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("VASER使用", isOn: $vaserUsed)
+                                Toggle("Aquicell使用", isOn: $aquicellUsed)
+                                
+                                Picker("採取部位", selection: $donorSite) {
+                                    ForEach(donorSiteOptions, id: \.self) { site in
+                                        Text(site).tag(site)
+                                    }
+                                }
+                                
+                                if donorSite == "その他" {
+                                    TextField("採取部位（その他）", text: $donorSiteOther)
+                                }
+                                
+                                HStack {
+                                    Text("注入量")
+                                    TextField("右胸 (cc)", text: $rightBreastVolume)
+                                        .frame(width: 100)
+                                    TextField("左胸 (cc)", text: $leftBreastVolume)
+                                        .frame(width: 100)
+                                }
+                                
+                                Toggle("術前Vectra撮影", isOn: $preOpVectra)
+                                
+                                Picker("皮膚弛緩度", selection: $skinLaxity) {
+                                    ForEach(skinLaxityOptions, id: \.self) { laxity in
+                                        Text(laxity).tag(laxity)
+                                    }
+                                }
+                            }
+                            .padding(8)
+                        }
+                    }
+                    
+                    // 備考
+                    GroupBox(label: Text("備考").font(.headline)) {
+                        TextEditor(text: $notes)
+                            .frame(height: 80)
+                            .padding(8)
+                    }
+                }
+                .padding()
+            }
+            
+            // Footer
+            HStack {
+                Spacer()
+                Button("キャンセル") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Button("保存") {
+                    saveSurgery()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+        }
+        .frame(width: 700, height: 600)
+        .onAppear {
+            loadSurgeryData()
+        }
+        .overlay(
+            ToastView(message: toastMessage, isShowing: $showToast)
+                .animation(.easeInOut, value: showToast)
+            , alignment: .top
+        )
+    }
+    
+    private func loadSurgeryData() {
+        surgeryDate = surgery.surgeryDate ?? Date()
+        
+        if let categoryStr = surgery.surgeryCategory,
+           let category = SurgeryCategory(rawValue: categoryStr) {
+            surgeryCategory = category
+        }
+        
+        if let typeStr = surgery.surgeryType,
+           let type = SurgeryType(rawValue: typeStr) {
+            surgeryType = type
+        }
+        
+        vaserUsed = surgery.vaserUsed
+        aquicellUsed = surgery.aquicellUsed
+        donorSite = surgery.donorSite ?? "腹部"
+        rightBreastVolume = surgery.rightBreastVolume ?? ""
+        leftBreastVolume = surgery.leftBreastVolume ?? ""
+        preOpVectra = surgery.preOpVectra
+        skinLaxity = surgery.skinLaxity ?? "正常"
+        notes = surgery.notes ?? ""
+    }
+    
+    private func saveSurgery() {
+        surgery.surgeryDate = surgeryDate
+        surgery.surgeryCategory = surgeryCategory.rawValue
+        surgery.surgeryType = surgeryType.rawValue
+        surgery.vaserUsed = vaserUsed
+        surgery.aquicellUsed = aquicellUsed
+        surgery.donorSite = donorSite == "その他" ? donorSiteOther : donorSite
+        surgery.rightBreastVolume = rightBreastVolume
+        surgery.leftBreastVolume = leftBreastVolume
+        surgery.preOpVectra = preOpVectra
+        surgery.skinLaxity = skinLaxity
+        surgery.notes = notes
+        
+        do {
+            try Persistence.shared.container.viewContext.save()
+            toastMessage = "手術情報を更新しました"
+            showToast = true
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                presentationMode.wrappedValue.dismiss()
+            }
+        } catch {
+            toastMessage = "保存に失敗しました"
+            showToast = true
+        }
+    }
+}
+
+// MARK: - Add Follow-Up View
+struct AddFollowUpView: View {
+    @Environment(\.presentationMode) var presentationMode
+    let surgery: Surgery
+    
+    @State private var timing = "1W"
+    @State private var measurementDate = Date()
+    @State private var breastQScore: Int16 = 0
+    @State private var smokingStatus = "なし"
+    @State private var bodyWeight: Double = 0.0
+    @State private var vectraPerformed = false
+    @State private var notes = ""
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    let timingOptions = ["1W", "1M", "3M", "6M", "1Y", "その他"]
+    let smokingOptions = ["なし", "あり（継続）", "あり（禁煙中）"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("新規フォローアップ記録")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .imageScale(.large)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            // Form Content
+            Form {
+                Section(header: Text("基本情報")) {
+                    Picker("時期", selection: $timing) {
+                        ForEach(timingOptions, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                    DatePicker("測定日", selection: $measurementDate, displayedComponents: .date)
+                }
+                
+                Section(header: Text("測定データ")) {
+                    TextField("体重 (kg)", value: $bodyWeight, format: .number)
+                    TextField("Breast-Q スコア", value: $breastQScore, format: .number)
+                    Picker("喫煙状況", selection: $smokingStatus) {
+                        ForEach(smokingOptions, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                    Toggle("Vectra撮影実施", isOn: $vectraPerformed)
+                }
+                
+                Section(header: Text("備考")) {
+                    TextEditor(text: $notes)
+                        .frame(height: 80)
+                }
+            }
+            
+            // Footer
+            HStack {
+                Spacer()
+                Button("キャンセル") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Button("登録") {
+                    saveFollowUp()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+        }
+        .frame(width: 600, height: 500)
+        .overlay(
+            ToastView(message: toastMessage, isShowing: $showToast)
+                .animation(.easeInOut, value: showToast)
+            , alignment: .top
+        )
+    }
+    
+    private func saveFollowUp() {
+        let context = Persistence.shared.container.viewContext
+        _ = Persistence.shared.saveFollowUp(
+            context: context,
+            surgery: surgery,
+            timing: timing,
+            measurementDate: measurementDate,
+            vectraPerformed: vectraPerformed,
+            bodyWeight: bodyWeight,
+            smokingStatus: smokingStatus,
+            breastQScore: Int(breastQScore),
+            notes: notes
+        )
+        
+        toastMessage = "フォローアップを登録しました"
+        showToast = true
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            presentationMode.wrappedValue.dismiss()
+        }
+    }
+}
+
+// MARK: - Edit Follow-Up View
+struct EditFollowUpView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var followUp: FollowUp
+    
+    @State private var timing = "1W"
+    @State private var measurementDate = Date()
+    @State private var breastQScore: Int16 = 0
+    @State private var smokingStatus = "なし"
+    @State private var bodyWeight: Double = 0.0
+    @State private var vectraPerformed = false
+    @State private var notes = ""
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    let timingOptions = ["1W", "1M", "3M", "6M", "1Y", "その他"]
+    let smokingOptions = ["なし", "あり（継続）", "あり（禁煙中）"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("フォローアップ編集")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .imageScale(.large)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            // Form Content
+            Form {
+                Section(header: Text("基本情報")) {
+                    Picker("時期", selection: $timing) {
+                        ForEach(timingOptions, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                    DatePicker("測定日", selection: $measurementDate, displayedComponents: .date)
+                }
+                
+                Section(header: Text("測定データ")) {
+                    TextField("体重 (kg)", value: $bodyWeight, format: .number)
+                    TextField("Breast-Q スコア", value: $breastQScore, format: .number)
+                    Picker("喫煙状況", selection: $smokingStatus) {
+                        ForEach(smokingOptions, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                    Toggle("Vectra撮影実施", isOn: $vectraPerformed)
+                }
+                
+                Section(header: Text("備考")) {
+                    TextEditor(text: $notes)
+                        .frame(height: 80)
+                }
+            }
+            
+            // Footer
+            HStack {
+                Spacer()
+                Button("キャンセル") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Button("保存") {
+                    saveFollowUp()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+        }
+        .frame(width: 600, height: 500)
+        .onAppear {
+            timing = followUp.timing ?? "1W"
+            measurementDate = followUp.measurementDate ?? Date()
+            breastQScore = followUp.breastQScore
+            smokingStatus = followUp.smokingStatus ?? "なし"
+            bodyWeight = followUp.bodyWeight
+            vectraPerformed = followUp.vectraPerformed
+            notes = followUp.notes ?? ""
+        }
+        .overlay(
+            ToastView(message: toastMessage, isShowing: $showToast)
+                .animation(.easeInOut, value: showToast)
+            , alignment: .top
+        )
+    }
+    
+    private func saveFollowUp() {
+        followUp.timing = timing
+        followUp.measurementDate = measurementDate
+        followUp.breastQScore = breastQScore
+        followUp.smokingStatus = smokingStatus
+        followUp.bodyWeight = bodyWeight
+        followUp.vectraPerformed = vectraPerformed
+        followUp.notes = notes
+        
+        do {
+            try Persistence.shared.container.viewContext.save()
+            toastMessage = "フォローアップを更新しました"
+            showToast = true
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                presentationMode.wrappedValue.dismiss()
+            }
+        } catch {
+            toastMessage = "保存に失敗しました"
+            showToast = true
+        }
+    }
+}
+
+// MARK: - Toast View
+struct ToastView: View {
+    let message: String
+    @Binding var isShowing: Bool
+    
+    var body: some View {
+        if isShowing {
+            Text(message)
+                .padding()
+                .background(Color.black.opacity(0.8))
+                .foregroundColor(.white)
+                .cornerRadius(8)
+                .padding(.top, 50)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        isShowing = false
+                    }
+                }
+        }
+    }
+}
+

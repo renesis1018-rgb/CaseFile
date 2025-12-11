@@ -62,7 +62,7 @@ struct ContentView: View {
                 AddPatientView(context: viewContext)
             }
             .sheet(isPresented: $showCSVImport) {
-                CSVImportView()
+                CSVImportView(context: viewContext)
             }
             
             // 右側の初期表示（患者未選択時）
@@ -77,22 +77,6 @@ struct ContentView: View {
             }
         }
     }
-    // MARK: - Delete Patient Function
-    
-    private func deletePatient(_ patient: Patient) {
-        viewContext.delete(patient)
-        
-        do {
-            try viewContext.save()
-            // 削除した患者が選択されていた場合は選択解除
-            if selectedPatient == patient {
-                selectedPatient = nil
-            }
-        } catch {
-            print("患者削除エラー: \(error.localizedDescription)")
-        }
-    }
-    
     
     // MARK: - Header View
     
@@ -134,13 +118,6 @@ struct ContentView: View {
         List(filteredPatients, id: \.objectID, selection: $selectedPatient) { patient in
             NavigationLink(destination: PatientDetailView(patient: patient)) {
                 PatientRowView(patient: patient)
-            }
-            .contextMenu {
-                Button(role: .destructive, action: {
-                    deletePatient(patient)
-                }) {
-                    Label("削除", systemImage: "trash")
-                }
             }
         }
         .listStyle(.sidebar)
@@ -205,7 +182,7 @@ struct PatientRowView: View {
                 
                 Spacer()
                 
-                Text("\(patient.age?.int16Value ?? 0)歳")
+                Text("\(patient.age)歳")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                 

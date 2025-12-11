@@ -1,0 +1,364 @@
+import SwiftUI
+import CoreData
+import UniformTypeIdentifiers
+
+struct CSVImportView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    
+    @StateObject private var manager: CSVImporterManager
+    @State private var showFilePicker = false
+    @State private var selectedStep: ImportStep?
+    @State private var showAlert = false
+    @State private var alertMessage = ""
+    
+    init() {
+        let context = PersistenceController.shared.container.viewContext
+        _manager = StateObject(wrappedValue: CSVImporterManager(context: context))
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // ヘッダー
+            HStack {
+                Text("CSVデータインポート")
+                    .font(.title)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button("閉じる") {
+                    dismiss()
+                }
+            }
+            .padding()
+            
+            Divider()
+            
+            if manager.isImporting {
+                // インポート中
+                importingView
+            } else if !manager.completedSteps.isEmpty {
+                // インポート完了後
+                completionView
+            } else {
+                // 初期画面
+                stepSelectionView
+            }
+            
+            Spacer()
+        }
+        .frame(width: 800, height: 700)
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: [.commaSeparatedText, .plainText],
+            allowsMultipleSelection: false
+        ) { result in
+            handleFileSelection(result)
+        }
+        .alert("エラー", isPresented: $showAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(alertMessage)
+        }
+    }
+    
+    // MARK: - Step Selection View
+    private var stepSelectionView: some View {
+        VStack(spacing: 30) {
+            Text("インポートするCSVファイルを選択してください")
+                .font(.headline)
+            
+            Text("必ず以下の順番でインポートしてください")
+                .font(.subheadline)
+                .foregroundColor(.orange)
+                .fontWeight(.semibold)
+            
+            VStack(spacing: 15) {
+                ForEach(ImportStep.allCases, id: \.self) { step in
+                    StepCard(
+                        step: step,
+                        isCompleted: manager.completedSteps.contains(step),
+                        isEnabled: canImportStep(step),
+                        action: {
+                            selectedStep = step
+                            showFilePicker = true
+                        }
+                    )
+                }
+            }
+            .padding()
+            
+            if !manager.completedSteps.isEmpty {
+                Button("リセット") {
+                    manager.reset()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+    }
+    
+    // MARK: - Importing View
+    private var importingView: some View {
+        VStack(spacing: 30) {
+            if let currentStep = manager.currentStep {
+                Image(systemName: currentStep.icon)
+                    .font(.system(size: 60))
+                    .foregroundColor(.blue)
+                
+                Text("\(currentStep.title)をインポート中...")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                VStack(spacing: 15) {
+                    ProgressView(value: manager.progress) {
+                        HStack {
+                            Text("進捗")
+                            Spacer()
+                            Text("\(Int(manager.progress * 100))%")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .progressViewStyle(.linear)
+                    
+                    Text(manager.status)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(10)
+            }
+        }
+        .padding(40)
+    }
+    
+    // MARK: - Completion View
+    private var completionView: some View {
+        VStack(spacing: 30) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 80))
+                .foregroundColor(.green)
+            
+            Text("インポート完了")
+                .font(.title)
+                .fontWeight(.bold)
+            
+            // 統計情報
+            HStack(spacing: 30) {
+                StatView(icon: "person.fill", title: "患者", count: manager.patientCount, color: .green)
+                StatView(icon: "stethoscope", title: "手術", count: manager.surgeryCount, color: .blue)
+                StatView(icon: "cross.vial", title: "検査", count: manager.labDataCount, color: .orange)
+                StatView(icon: "chart.line.uptrend.xyaxis", title: "経過", count: manager.followUpCount, color: .purple)
+            }
+            
+            // 完了ステップ
+            VStack(alignment: .leading, spacing: 10) {
+                Text("インポート済み:")
+                    .font(.headline)
+                
+                ForEach(manager.completedSteps.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { step in
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text(step.title)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color.green.opacity(0.1))
+            .cornerRadius(10)
+            
+            // エラーリスト
+            if !manager.errors.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("⚠️ \(manager.errors.count)件のエラー")
+                        .font(.headline)
+                    
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(manager.errors.prefix(10)) { error in
+                                HStack {
+                                    Text("\(error.step.title) \(error.row)行目:")
+                                        .fontWeight(.semibold)
+                                    Text(error.message)
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 100)
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(10)
+            }
+            
+            HStack(spacing: 20) {
+                if manager.completedSteps.count < ImportStep.allCases.count {
+                    Button("続きをインポート") {
+                        // 初期画面に戻る
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                
+                Button("完了") {
+                    dismiss()
+                }
+                .buttonStyle(manager.completedSteps.count < ImportStep.allCases.count ? .bordered : .borderedProminent)
+            }
+        }
+        .padding(40)
+    }
+    
+    // MARK: - Can Import Step
+    private func canImportStep(_ step: ImportStep) -> Bool {
+        switch step {
+        case .patient:
+            return true
+        case .surgery:
+            return manager.completedSteps.contains(.patient)
+        case .labData:
+            return manager.completedSteps.contains(.patient) && manager.completedSteps.contains(.surgery)
+        case .followUp:
+            return manager.completedSteps.contains(.patient) && manager.completedSteps.contains(.surgery)
+        }
+    }
+    
+    // MARK: - File Selection Handler
+    private func handleFileSelection(_ result: Result<[URL], Error>) {
+        guard let step = selectedStep else { return }
+        
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            startImport(step: step, from: url)
+            
+        case .failure(let error):
+            alertMessage = "ファイル選択エラー: \(error.localizedDescription)"
+            showAlert = true
+        }
+    }
+    
+    // MARK: - Start Import
+    private func startImport(step: ImportStep, from url: URL) {
+        Task {
+            do {
+                try await manager.importCSV(step: step, from: url)
+            } catch {
+                alertMessage = "インポートエラー: \(error.localizedDescription)"
+                showAlert = true
+                manager.isImporting = false
+            }
+        }
+    }
+}
+
+// MARK: - Step Card
+struct StepCard: View {
+    let step: ImportStep
+    let isCompleted: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 20) {
+                // ステップ番号
+                ZStack {
+                    Circle()
+                        .fill(isCompleted ? Color.green : (isEnabled ? Color.blue : Color.gray))
+                        .frame(width: 40, height: 40)
+                    
+                    if isCompleted {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.white)
+                            .fontWeight(.bold)
+                    } else {
+                        Text("\(step.rawValue)")
+                            .foregroundColor(.white)
+                            .fontWeight(.bold)
+                    }
+                }
+                
+                // アイコン
+                Image(systemName: step.icon)
+                    .font(.system(size: 30))
+                    .foregroundColor(isEnabled ? .blue : .gray)
+                
+                // タイトル
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(step.title)
+                        .font(.headline)
+                        .foregroundColor(isEnabled ? .primary : .secondary)
+                    
+                    Text(step.fileName)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                // 状態表示
+                if isCompleted {
+                    Text("完了")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.green.opacity(0.2))
+                        .cornerRadius(12)
+                } else if !isEnabled {
+                    Text("前のステップを完了してください")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+            }
+            .padding()
+            .background(isEnabled ? Color.blue.opacity(0.05) : Color.gray.opacity(0.05))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isCompleted ? Color.green : (isEnabled ? Color.blue : Color.gray), lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled || isCompleted)
+    }
+}
+
+// MARK: - Stat View
+struct StatView: View {
+    let icon: String
+    let title: String
+    let count: Int
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 40))
+                .foregroundColor(color)
+            
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Text("\(count)件")
+                .font(.title3)
+                .fontWeight(.bold)
+        }
+        .frame(width: 120)
+        .padding()
+        .background(color.opacity(0.1))
+        .cornerRadius(10)
+    }
+}
+
+#Preview {
+    CSVImportView()
+        .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+}

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F86EC7CC2EE552CA0050EF75 /* CoreXLSX in Frameworks */ = {isa = PBXBuildFile; productRef = F86EC7CB2EE552CA0050EF75 /* CoreXLSX */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		F8E0B4B72EE1F18F00033997 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F86EC7CC2EE552CA0050EF75 /* CoreXLSX in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = CaseFile;
 			packageProductDependencies = (
+				F86EC7CB2EE552CA0050EF75 /* CoreXLSX */,
 			);
 			productName = CaseFile;
 			productReference = F8E0B4A92EE1F18E00033997 /* CaseFile.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = F8E0B4A02EE1F18E00033997;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F86EC7C42EE54E480050EF75 /* XCRemoteSwiftPackageReference "CoreXLSX" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F8E0B4AA2EE1F18E00033997 /* Products */;
 			projectDirPath = "";
@@ -573,6 +582,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F86EC7C42EE54E480050EF75 /* XCRemoteSwiftPackageReference "CoreXLSX" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CoreOffice/CoreXLSX";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.14.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F86EC7CB2EE552CA0050EF75 /* CoreXLSX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F86EC7C42EE54E480050EF75 /* XCRemoteSwiftPackageReference "CoreXLSX" */;
+			productName = CoreXLSX;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F8E0B4A12EE1F18E00033997 /* Project object */;
 }

@@ -1,0 +1,330 @@
+import SwiftUI
+import CoreData
+import UniformTypeIdentifiers
+
+struct PhotoManagementView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @ObservedObject var surgery: Surgery
+    
+    @State private var showPhotoUpload = false
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    var photosByTiming: [String: [Photo]] {
+        let photos = surgery.photosArray
+        return Dictionary(grouping: photos) { photo in
+            photo.timing ?? "不明"
+        }
+    }
+    
+    let timingOrder = ["術前", "1W", "1M", "3M", "6M", "12M"]
+    
+    var sortedTimings: [String] {
+        let allTimings = Set(photosByTiming.keys)
+        var sorted: [String] = []
+        
+        // 定義された順序
+        for timing in timingOrder {
+            if allTimings.contains(timing) {
+                sorted.append(timing)
+            }
+        }
+        
+        // Day XX形式
+        let dayTimings = allTimings.filter { $0.hasPrefix("Day ") }.sorted { timing1, timing2 in
+            let day1 = Int(timing1.replacingOccurrences(of: "Day ", with: "")) ?? 0
+            let day2 = Int(timing2.replacingOccurrences(of: "Day ", with: "")) ?? 0
+            return day1 < day2
+        }
+        sorted.append(contentsOf: dayTimings)
+        
+        // その他
+        let others = allTimings.subtracting(sorted)
+        sorted.append(contentsOf: others.sorted())
+        
+        return sorted
+    }
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                // ヘッダー
+                HStack {
+                    Text("写真管理")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    
+                    Spacer()
+                    
+                    Button {
+                        showPhotoUpload = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                            Text("写真を追加")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                    }
+                }
+                .padding(.horizontal)
+                
+                if surgery.photosArray.isEmpty {
+                    VStack(spacing: 20) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray)
+                        Text("写真がまだありません")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+                        Button("写真を追加") {
+                            showPhotoUpload = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: 400)
+                } else {
+                    // 時期別グループ表示
+                    ForEach(sortedTimings, id: \.self) { timing in
+                        TimingGroupView(
+                            timing: timing,
+                            photos: photosByTiming[timing] ?? [],
+                            onDelete: { photo in
+                                deletePhoto(photo)
+                            }
+                        )
+                    }
+                }
+            }
+            .padding()
+        }
+        .sheet(isPresented: $showPhotoUpload) {
+            PhotoUploadView(surgery: surgery) { message in
+                toastMessage = message
+                showToast = true
+            }
+        }
+        .overlay(
+            ToastView(message: toastMessage, isShowing: $showToast)
+                .animation(.easeInOut, value: showToast)
+        )
+    }
+    
+    func deletePhoto(_ photo: Photo) {
+        PhotoManager.shared.deletePhoto(context: viewContext, photo: photo)
+        toastMessage = "✅ 写真を削除しました"
+        showToast = true
+    }
+}
+
+// MARK: - 時期別グループ表示
+
+struct TimingGroupView: View {
+    let timing: String
+    let photos: [Photo]
+    let onDelete: (Photo) -> Void
+    
+    let angleOrder = ["正面", "右側面", "右斜め", "左斜め", "左側面", "その他"]
+    
+    var photosByAngle: [String: [Photo]] {
+        Dictionary(grouping: photos) { photo in
+            photo.angle ?? "不明"
+        }
+    }
+    
+    var sortedAngles: [String] {
+        let allAngles = Set(photosByAngle.keys)
+        var sorted: [String] = []
+        
+        for angle in angleOrder {
+            if allAngles.contains(angle) {
+                sorted.append(angle)
+            }
+        }
+        
+        let others = allAngles.subtracting(sorted)
+        sorted.append(contentsOf: others.sorted())
+        
+        return sorted
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("📅 \(timing)")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                
+                if let firstPhoto = photos.first, let exifDate = firstPhoto.exifDate {
+                    Text("(\(formatDate(exifDate)))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Text("\(photos.count)枚")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Divider()
+            
+            // 角度別表示
+            ForEach(sortedAngles, id: \.self) { angle in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(angle)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(photosByAngle[angle] ?? [], id: \.id) { photo in
+                                PhotoThumbnailView(photo: photo, onDelete: {
+                                    onDelete(photo)
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(12)
+    }
+    
+    func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/MM/dd HH:mm"
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - サムネイル表示
+
+struct PhotoThumbnailView: View {
+    let photo: Photo
+    let onDelete: () -> Void
+    
+    @State private var showFullImage = false
+    @State private var showDeleteConfirm = false
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            if let thumbnailData = photo.thumbnail,
+               let nsImage = NSImage(data: thumbnailData) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 150, height: 150)
+                    .clipped()
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .onTapGesture {
+                        showFullImage = true
+                    }
+                    .contextMenu {
+                        Button("フルサイズで表示") {
+                            showFullImage = true
+                        }
+                        Divider()
+                        Button("削除", role: .destructive) {
+                            showDeleteConfirm = true
+                        }
+                    }
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 150, height: 150)
+                    .cornerRadius(8)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .foregroundColor(.gray)
+                    )
+            }
+            
+            if let notes = photo.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .frame(width: 150)
+            }
+        }
+        .sheet(isPresented: $showFullImage) {
+            PhotoDetailView(photo: photo)
+        }
+        .alert("写真を削除しますか？", isPresented: $showDeleteConfirm) {
+            Button("キャンセル", role: .cancel) { }
+            Button("削除", role: .destructive) {
+                onDelete()
+            }
+        } message: {
+            Text("この操作は取り消せません")
+        }
+    }
+}
+
+// MARK: - フルサイズ表示
+
+struct PhotoDetailView: View {
+    @Environment(\.dismiss) var dismiss
+    let photo: Photo
+    
+    var body: some View {
+        VStack {
+            HStack {
+                Text("\(photo.timing ?? "不明") - \(photo.angle ?? "不明")")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Button("閉じる") {
+                    dismiss()
+                }
+            }
+            .padding()
+            
+            if let imageData = photo.imageData,
+               let nsImage = NSImage(data: imageData) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFit()
+            }
+            
+            if let exifDate = photo.exifDate {
+                Text("撮影日: \(formatDate(exifDate))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding()
+            }
+        }
+        .frame(width: 800, height: 600)
+    }
+    
+    func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/MM/dd HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Surgery拡張
+
+extension Surgery {
+    var photosArray: [Photo] {
+        let set = photos as? Set<Photo> ?? []
+        return set.sorted { photo1, photo2 in
+            if let date1 = photo1.exifDate, let date2 = photo2.exifDate {
+                return date1 < date2
+            }
+            return photo1.uploadDate! < photo2.uploadDate!
+        }
+    }
+}
