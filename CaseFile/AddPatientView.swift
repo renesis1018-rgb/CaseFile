@@ -54,7 +54,7 @@ struct AddPatientView: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 100)
                     }
-                    .onChange(of: age) { _ in
+                    .onChange(of: age) {
                         age = age.filter { $0.isNumber }
                     }
                     
@@ -133,16 +133,35 @@ struct AddPatientView: View {
     
     private func savePatient() {
         // バリデーション: 患者IDのみ必須
-        if patientId.trimmingCharacters(in: .whitespaces).isEmpty {
+        let trimmedId = patientId.trimmingCharacters(in: .whitespaces)
+        
+        if trimmedId.isEmpty {
             showAlert("エラー", "患者IDを入力してください")
+            return
+        }
+        
+        // 🆕 患者ID重複チェック
+        if isPatientIdDuplicate(trimmedId) {
+            showAlert("エラー", "この患者IDは既に使用されています")
+            return
+        }
+        
+        // 年齢のバリデーション
+        let ageValue: Int16
+        if age.isEmpty {
+            ageValue = 0
+        } else if let parsedAge = Int16(age), parsedAge > 0, parsedAge <= 150 {
+            ageValue = parsedAge
+        } else {
+            showAlert("エラー", "年齢は1〜150の数値で入力してください")
             return
         }
         
         let newPatient = Patient(context: context)
         newPatient.id = UUID()
-        newPatient.patientId = patientId
-        newPatient.name = "患者\(patientId)"  // 名前は患者IDベースで自動生成
-        newPatient.age = age.isEmpty ? NSNumber(value: 0) : NSNumber(value: Int16(age) ?? 0)
+        newPatient.patientId = trimmedId
+        newPatient.name = "患者\(trimmedId)"  // 名前は患者IDベースで自動生成
+        newPatient.age = NSNumber(value: ageValue)
         newPatient.gender = gender
         newPatient.contactInfo = contactInfo.isEmpty ? nil : contactInfo
         newPatient.notes = notes.isEmpty ? nil : notes
@@ -150,9 +169,24 @@ struct AddPatientView: View {
         
         do {
             try context.save()
+            print("✅ 新規患者を登録しました: ID=\(trimmedId)")
             dismiss()
         } catch {
             showAlert("保存エラー", "患者情報の保存に失敗しました: \(error.localizedDescription)")
+        }
+    }
+    
+    // 🆕 患者ID重複チェック
+    private func isPatientIdDuplicate(_ id: String) -> Bool {
+        let request: NSFetchRequest<Patient> = Patient.fetchRequest()
+        request.predicate = NSPredicate(format: "patientId == %@", id)
+        
+        do {
+            let count = try context.count(for: request)
+            return count > 0
+        } catch {
+            print("⚠️ 重複チェックエラー: \(error)")
+            return false
         }
     }
     

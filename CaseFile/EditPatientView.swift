@@ -120,13 +120,14 @@ struct EditPatientView: View {
                 loadPatientData()
             }
         }
+        .frame(minWidth: 500, minHeight: 500)
     }
     
     // MARK: - Actions
     
     private func loadPatientData() {
         patientId = patient.patientId ?? ""
-        age = "(patient.age?.int16Value ?? 0)"
+        age = "\(patient.age ?? 0)"  // ← 修正：デフォルト値を指定
         gender = patient.gender ?? "女性"
         name = patient.name ?? ""
         contactInfo = patient.contactInfo ?? ""
@@ -148,7 +149,7 @@ struct EditPatientView: View {
         }
         
         // 患者ID重複チェック（自分自身を除く）
-        if PersistenceController.shared.isPatientIdDuplicate(patientId, excluding: patient) {
+        if isPatientIdDuplicate(patientId) {
             errorMessage = "この患者IDは既に使用されています"
             showError = true
             return
@@ -156,7 +157,7 @@ struct EditPatientView: View {
         
         // 保存
         patient.patientId = patientId.trimmingCharacters(in: .whitespaces)
-        patient.age = NSNumber(value: ageValue)
+        patient.age = NSNumber(value: ageValue)  // ← 修正：NSNumberに変換
         patient.gender = gender
         patient.name = name.isEmpty ? nil : name
         patient.contactInfo = contactInfo.isEmpty ? nil : contactInfo
@@ -164,10 +165,31 @@ struct EditPatientView: View {
         
         do {
             try viewContext.save()
+            print("✅ 患者情報を保存しました")
             dismiss()
         } catch {
             errorMessage = "保存に失敗しました: \(error.localizedDescription)"
             showError = true
+        }
+    }
+    
+    // MARK: - Validation
+    
+    /// 患者ID重複チェック（自分自身を除く）
+    private func isPatientIdDuplicate(_ id: String) -> Bool {
+        let request: NSFetchRequest<Patient> = Patient.fetchRequest()
+        request.predicate = NSPredicate(
+            format: "patientId == %@ AND self != %@",
+            id.trimmingCharacters(in: .whitespaces),
+            patient
+        )
+        
+        do {
+            let count = try viewContext.count(for: request)
+            return count > 0
+        } catch {
+            print("⚠️ 重複チェックエラー: \(error)")
+            return false
         }
     }
 }

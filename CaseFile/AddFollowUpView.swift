@@ -1,459 +1,334 @@
-//
-//  AddFollowUpView.swift
-//  CaseFile
-//
-//  経過情報（フォローアップ）入力画面
-//
-
 import SwiftUI
 import CoreData
 
 struct AddFollowUpView: View {
+    @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var surgery: Surgery
-    let context: NSManagedObjectContext
     
-    // MARK: - 基本情報
+    let surgery: Surgery
+    
     @State private var followUpDate = Date()
-    @State private var dayAfterSurgery = ""
+    @State private var vectraValueRight: String = ""
+    @State private var vectraValueLeft: String = ""
+    @State private var bodyWeight: String = ""
+    @State private var notes: String = ""
     
-    // MARK: - 測定値
-    @State private var vectraValueRight = ""
-    @State private var vectraValueLeft = ""
-    @State private var bodyWeight = ""
-    
-    // MARK: - 備考
-    @State private var notes = ""
-    
-    // MARK: - 自動計算（定着率）
-    @State private var retentionRateRight: Double? = nil
-    @State private var retentionRateLeft: Double? = nil
-    
-    // MARK: - エラー表示
-    @State private var showError = false
-    @State private var errorMessage = ""
+    // 自動計算
+    @State private var dayAfterSurgery: Int = 0
+    @State private var retentionRateRight: Double = 0
+    @State private var retentionRateLeft: Double = 0
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 0) {
-                    // MARK: - 基本情報
-                    basicInfoSection
-                    
-                    // MARK: - 測定値
+            Form {
+                // 基本情報セクション
+                basicInfoSection
+                
+                // 測定値セクション（手術カテゴリーに応じて表示）
+                if shouldShowMeasurements {
                     measurementsSection
-                    
-                    // MARK: - 定着率（自動計算・表示のみ）
+                }
+                
+                // 備考セクション
+                notesSection
+                
+                // 定着率セクション（豊胸系かつ脂肪注入のみ）
+                if shouldShowRetentionRate {
                     retentionRateSection
-                    
-                    // MARK: - 備考
-                    notesSection
                 }
             }
             .navigationTitle("経過情報登録")
+            .frame(minWidth: 500, minHeight: 400)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
+                    Button("キャンセル") {
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { saveFollowUp() }
+                    Button("保存") {
+                        saveFollowUp()
+                    }
                 }
             }
-            .alert("エラー", isPresented: $showError) {
-                Button("OK") {}
-            } message: {
-                Text(errorMessage)
+            .onChange(of: followUpDate) {
+                calculateDayAfterSurgery()
+            }
+            .onChange(of: vectraValueRight) {
+                calculateRetentionRate()
+            }
+            .onChange(of: vectraValueLeft) {
+                calculateRetentionRate()
+            }
+            .onAppear {
+                calculateDayAfterSurgery()
             }
         }
-        .frame(minWidth: 800, idealWidth: 900, minHeight: 700)
-        .onAppear {
-            calculateDaysAfterSurgery()
-        }
+        .frame(minWidth: 550, minHeight: 450)
     }
     
     // MARK: - 基本情報セクション
     private var basicInfoSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("基本情報")
-                    .font(.headline)
-                    .padding(.bottom, 4)
-                
-                DatePicker("フォローアップ日", selection: $followUpDate, displayedComponents: .date)
-                    .onChange(of: followUpDate) {
-                        calculateDaysAfterSurgery()
-                    }
-                
-                HStack {
-                    Text("術後経過日数")
-                        .frame(width: 120, alignment: .leading)
-                    TextField("自動計算", text: $dayAfterSurgery)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 100)
-                        .disabled(true)
-                    Text("日")
-                }
-                
-                Divider()
-                    .padding(.vertical, 8)
-                
-                if let surgeryDate = surgery.surgeryDate {
-                    HStack {
-                        Text("手術日")
-                            .frame(width: 120, alignment: .leading)
-                            .foregroundColor(.secondary)
-                        Text(formatDate(surgeryDate))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                HStack {
-                    Text("手術種別")
-                        .frame(width: 120, alignment: .leading)
-                        .foregroundColor(.secondary)
-                    Text(surgery.surgeryType ?? "不明")
-                        .foregroundColor(.secondary)
-                }
+        Section(header: Text("基本情報")) {
+            DatePicker("経過観察日", selection: $followUpDate, displayedComponents: .date)
+            
+            HStack {
+                Text("術後日数")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("\(dayAfterSurgery)日")
+                    .foregroundColor(.blue)
+                    .bold()
             }
-            .padding()
         }
-        .padding()
     }
     
     // MARK: - 測定値セクション
     private var measurementsSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("測定値")
-                    .font(.headline)
-                    .padding(.bottom, 4)
-                
+        Section(header: Text("測定値")) {
+            // 豊胸系（脂肪注入・シリコン）のみVectra値を表示
+            if isBreastSurgery {
                 HStack {
-                    MeasurementField(label: "Vectra測定値 (R)", value: $vectraValueRight, unit: "cc")
-                        .onChange(of: vectraValueRight) {
-                            calculateRetentionRate()
-                        }
-                    MeasurementField(label: "Vectra測定値 (L)", value: $vectraValueLeft, unit: "cc")
-                        .onChange(of: vectraValueLeft) {
-                            calculateRetentionRate()
-                        }
+                    Text("Vectra 右 (cc)")
+                        .frame(width: 140, alignment: .leading)
+                    TextField("例: 250", text: $vectraValueRight)
+                        .frame(maxWidth: 150)
                 }
                 
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("体重")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 4) {
-                            TextField("", text: $bodyWeight)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 150)
-                            
-                            Text("kg")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .frame(width: 40, alignment: .leading)
-                        }
-                    }
-                    
-                    Spacer()
+                    Text("Vectra 左 (cc)")
+                        .frame(width: 140, alignment: .leading)
+                    TextField("例: 250", text: $vectraValueLeft)
+                        .frame(maxWidth: 150)
                 }
             }
-            .padding()
-        }
-        .padding(.horizontal)
-        .padding(.bottom)
-    }
-    
-    // MARK: - 定着率セクション（自動計算・表示のみ）
-    private var retentionRateSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
+            
+            // 豊胸系（脂肪注入・シリコン）・脂肪吸引は体重を表示
+            if isBreastSurgery || isLiposuction {
                 HStack {
-                    Text("定着率（自動計算）")
-                        .font(.headline)
-                    
-                    Spacer()
-                    
-                    Image(systemName: "info.circle")
-                        .foregroundColor(.secondary)
-                        .help("定着率 = (フォローアップVectra - 術前Vectra) / 注入量 × 100")
+                    Text("体重 (kg)")
+                        .frame(width: 140, alignment: .leading)
+                    TextField("例: 55.5", text: $bodyWeight)
+                        .frame(maxWidth: 150)
                 }
-                .padding(.bottom, 4)
-                
-                HStack(spacing: 40) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("右側")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        if let rate = retentionRateRight {
-                            HStack(spacing: 8) {
-                                Text(String(format: "%.1f", rate))
-                                    .font(.system(size: 32, weight: .bold))
-                                    .foregroundColor(retentionRateColor(rate))
-                                Text("%")
-                                    .font(.title2)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else {
-                            Text("計算できません")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if let rate = retentionRateRight {
-                            Text(retentionRateComment(rate))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Divider()
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("左側")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        if let rate = retentionRateLeft {
-                            HStack(spacing: 8) {
-                                Text(String(format: "%.1f", rate))
-                                    .font(.system(size: 32, weight: .bold))
-                                    .foregroundColor(retentionRateColor(rate))
-                                Text("%")
-                                    .font(.title2)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else {
-                            Text("計算できません")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if let rate = retentionRateLeft {
-                            Text(retentionRateComment(rate))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding()
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                .cornerRadius(8)
-                
-                // 計算に必要なデータの表示
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("計算に使用したデータ:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    HStack {
-                        if let preOpR = surgery.preOpVectraR?.doubleValue {
-                            Text("術前Vectra(R): \(String(format: "%.0f", preOpR))cc")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if let injR = surgery.injectionVolumeR?.doubleValue {
-                            Text("注入量(R): \(String(format: "%.0f", injR))cc")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    HStack {
-                        if let preOpL = surgery.preOpVectraL?.doubleValue {
-                            Text("術前Vectra(L): \(String(format: "%.0f", preOpL))cc")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if let injL = surgery.injectionVolumeL?.doubleValue {
-                            Text("注入量(L): \(String(format: "%.0f", injL))cc")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                .padding(.top, 8)
             }
-            .padding()
         }
-        .padding(.horizontal)
-        .padding(.bottom)
     }
     
     // MARK: - 備考セクション
     private var notesSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("備考")
-                    .font(.headline)
-                    .padding(.bottom, 4)
-                
-                TextEditor(text: $notes)
-                    .frame(height: 150)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-            }
-            .padding()
+        Section(header: Text("備考")) {
+            TextEditor(text: $notes)
+                .frame(minHeight: 120)
+                .border(Color.gray.opacity(0.2), width: 1)
         }
-        .padding(.horizontal)
-        .padding(.bottom)
     }
     
-    // MARK: - Helper
-    
-    private func calculateDaysAfterSurgery() {
-        guard let surgeryDate = surgery.surgeryDate else {
-            dayAfterSurgery = "0"
-            return
+    // MARK: - 定着率セクション（豊胸系かつ脂肪注入のみ）
+    private var retentionRateSection: some View {
+        Section(header: Text("定着率（自動計算）")) {
+            VStack(alignment: .leading, spacing: 12) {
+                retentionRateRow(side: "右", rate: retentionRateRight)
+                Divider()
+                retentionRateRow(side: "左", rate: retentionRateLeft)
+            }
+            .padding(.vertical, 8)
         }
-        
-        let days = Calendar.current.dateComponents([.day], from: surgeryDate, to: followUpDate).day ?? 0
-        dayAfterSurgery = "\(max(0, days))"
+    }
+    
+    // MARK: - 定着率表示行
+    private func retentionRateRow(side: String, rate: Double) -> some View {
+        HStack {
+            Text(side)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 40, alignment: .leading)
+            
+            Text(String(format: "%.1f%%", rate))
+                .font(.title3)
+                .bold()
+                .foregroundColor(retentionRateColor(rate))
+            
+            Spacer()
+            
+            Text(retentionRateComment(rate))
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    // MARK: - 条件判定
+    private var isBreastSurgery: Bool {
+        surgery.surgeryCategory == "豊胸系"
+    }
+    
+    private var isFatInjection: Bool {
+        surgery.surgeryCategory == "豊胸系" && surgery.surgeryType == "脂肪注入"
+    }
+    
+    private var isLiposuction: Bool {
+        surgery.surgeryCategory == "脂肪吸引"
+    }
+    
+    private var isEyeSurgery: Bool {
+        surgery.surgeryCategory == "目元系"
+    }
+    
+    private var shouldShowMeasurements: Bool {
+        isBreastSurgery || isLiposuction
+    }
+    
+    private var shouldShowRetentionRate: Bool {
+        // 豊胸系かつ脂肪注入の場合のみ定着率を表示
+        isFatInjection && (Double(vectraValueRight) ?? 0 > 0 || Double(vectraValueLeft) ?? 0 > 0)
+    }
+    
+    // MARK: - 計算処理
+    private func calculateDayAfterSurgery() {
+        guard let surgeryDate = surgery.surgeryDate else { return }
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.day], from: surgeryDate, to: followUpDate)
+        dayAfterSurgery = components.day ?? 0
     }
     
     private func calculateRetentionRate() {
-        // 右側の定着率計算
-        if let vectraR = Double(vectraValueRight),
-           let preOpVectraR = surgery.preOpVectraR?.doubleValue,
-           let injectionR = surgery.injectionVolumeR?.doubleValue,
-           injectionR > 0 {
-            let volumeIncrease = vectraR - preOpVectraR
-            retentionRateRight = (volumeIncrease / injectionR) * 100
-        } else {
-            retentionRateRight = nil
-        }
+        guard isFatInjection else { return }
         
-        // 左側の定着率計算
-        if let vectraL = Double(vectraValueLeft),
-           let preOpVectraL = surgery.preOpVectraL?.doubleValue,
-           let injectionL = surgery.injectionVolumeL?.doubleValue,
-           injectionL > 0 {
-            let volumeIncrease = vectraL - preOpVectraL
-            retentionRateLeft = (volumeIncrease / injectionL) * 100
+        let vectraRight = Double(vectraValueRight) ?? 0
+        let vectraLeft = Double(vectraValueLeft) ?? 0
+        
+        // 術前Vectra値を取得
+        let preOpVectra = surgery.preOpVectra?.doubleValue ?? 0
+        
+        // 注入量を取得（Core Dataに存在しない場合は計算不可）
+        let injectionVolume: Double = 0 // 仮の値（実際の属性がないため）
+        
+        if preOpVectra > 0 && injectionVolume > 0 {
+            retentionRateRight = ((vectraRight - preOpVectra) / injectionVolume) * 100
+            retentionRateLeft = ((vectraLeft - preOpVectra) / injectionVolume) * 100
         } else {
-            retentionRateLeft = nil
+            retentionRateRight = 0
+            retentionRateLeft = 0
         }
     }
     
     private func retentionRateColor(_ rate: Double) -> Color {
-        switch rate {
-        case 70...: return .green
-        case 50..<70: return .orange
-        default: return .red
-        }
+        if rate >= 70 { return .green }
+        if rate >= 50 { return .orange }
+        return .red
     }
     
     private func retentionRateComment(_ rate: Double) -> String {
-        switch rate {
-        case 70...: return "良好な定着"
-        case 50..<70: return "標準的な定着"
-        default: return "低い定着"
-        }
-    }
-    
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy年M月d日"
-        formatter.locale = Locale(identifier: "ja_JP")
-        return formatter.string(from: date)
+        if rate >= 70 { return "良好" }
+        if rate >= 50 { return "標準" }
+        return "要観察"
     }
     
     // MARK: - 保存処理
     private func saveFollowUp() {
         let newFollowUp = FollowUp(context: context)
         newFollowUp.id = UUID()
-        newFollowUp.surgery = surgery
         newFollowUp.followUpDate = followUpDate
+        newFollowUp.surgery = surgery
         
-        // すべてのデータを notes に統合して保存
-        let daysNote = "【術後経過】\(dayAfterSurgery)日\n"
-        let weightNote = bodyWeight.isEmpty ? "" : "【体重】\(bodyWeight)kg\n"
+        // 備考欄にすべての情報を保存
+        var notesText = ""
         
-        let vectraNote = """
-        【Vectra測定値】
-        右: \(vectraValueRight.isEmpty ? "未測定" : vectraValueRight + "cc")
-        左: \(vectraValueLeft.isEmpty ? "未測定" : vectraValueLeft + "cc")
+        // 術後日数
+        notesText += "術後日数: \(dayAfterSurgery)日\n"
         
-        """
-        
-        var retentionNote = ""
-        if let rateR = retentionRateRight {
-            retentionNote += "【定着率(R)】\(String(format: "%.1f", rateR))%\n"
-        }
-        if let rateL = retentionRateLeft {
-            retentionNote += "【定着率(L)】\(String(format: "%.1f", rateL))%\n"
-        }
-        if !retentionNote.isEmpty {
-            retentionNote += "\n"
-        }
-        
-        // すべてのメモを統合
-        newFollowUp.notes = daysNote + weightNote + vectraNote + retentionNote + notes
-        
-        // Core Data保存
-        do {
-            try context.save()
-            print("✅ 経過情報保存成功")
-            print("  術後経過日数: \(dayAfterSurgery)日")
-            print("  定着率(R): \(retentionRateRight.map { String(format: "%.1f%%", $0) } ?? "計算不可")")
-            print("  定着率(L): \(retentionRateLeft.map { String(format: "%.1f%%", $0) } ?? "計算不可")")
-            dismiss()
-        } catch let error as NSError {
-            print("❌ 経過情報保存エラー: \(error)")
-            errorMessage = "保存に失敗しました: \(error.localizedDescription)"
-            showError = true
-        }
-    }
-}
-
-// MARK: - 測定値入力フィールド（再利用可能コンポーネント）
-struct MeasurementField: View {
-    let label: String
-    @Binding var value: String
-    let unit: String
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
+        // 豊胸系の場合
+        if isBreastSurgery {
+            if let vectraRight = Double(vectraValueRight), vectraRight > 0 {
+                notesText += "Vectra 右: \(Int(vectraRight)) cc\n"
+            }
+            if let vectraLeft = Double(vectraValueLeft), vectraLeft > 0 {
+                notesText += "Vectra 左: \(Int(vectraLeft)) cc\n"
+            }
             
-            HStack(spacing: 4) {
-                TextField("", text: $value)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: .infinity)
-                
-                Text(unit)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(width: 40, alignment: .leading)
+            // 定着率は脂肪注入のみ
+            if isFatInjection {
+                if retentionRateRight > 0 {
+                    notesText += "定着率 右: \(String(format: "%.1f%%", retentionRateRight))\n"
+                }
+                if retentionRateLeft > 0 {
+                    notesText += "定着率 左: \(String(format: "%.1f%%", retentionRateLeft))\n"
+                }
             }
         }
-        .frame(maxWidth: .infinity)
+        
+        // 体重（豊胸系・脂肪吸引）
+        if (isBreastSurgery || isLiposuction), let weight = Double(bodyWeight), weight > 0 {
+            notesText += "体重: \(String(format: "%.1f kg", weight))\n"
+        }
+        
+        // ユーザー備考
+        if !notes.isEmpty {
+            notesText += "\n【備考】\n\(notes)"
+        }
+        
+        newFollowUp.notes = notesText
+        
+        do {
+            try context.save()
+            print("✅ 経過情報を保存しました")
+            print("保存内容: \(notesText)")
+            dismiss()
+        } catch {
+            print("❌ 経過情報の保存に失敗: \(error.localizedDescription)")
+        }
     }
 }
 
-// MARK: - Preview
-#Preview {
-    let context = PersistenceController.preview.container.viewContext
-    let surgery = Surgery(context: context)
-    surgery.id = UUID()
-    surgery.surgeryType = "脂肪注入"
-    surgery.surgeryDate = Date().addingTimeInterval(-30 * 24 * 60 * 60) // 30日前
-    surgery.preOpVectraR = NSNumber(value: 200)
-    surgery.preOpVectraL = NSNumber(value: 200)
-    surgery.injectionVolumeR = NSNumber(value: 150)
-    surgery.injectionVolumeL = NSNumber(value: 150)
-    
-    return AddFollowUpView(surgery: surgery, context: context)
+// MARK: - プレビュー
+struct AddFollowUpView_Previews: PreviewProvider {
+    static var previews: some View {
+        let context = PersistenceController.preview.container.viewContext
+        
+        // 豊胸系（脂肪注入）の手術
+        let fatInjectionSurgery = Surgery(context: context)
+        fatInjectionSurgery.id = UUID()
+        fatInjectionSurgery.surgeryDate = Date()
+        fatInjectionSurgery.surgeryCategory = "豊胸系"
+        fatInjectionSurgery.surgeryType = "脂肪注入"
+        
+        // 豊胸系（シリコン）の手術
+        let siliconeSurgery = Surgery(context: context)
+        siliconeSurgery.id = UUID()
+        siliconeSurgery.surgeryDate = Date()
+        siliconeSurgery.surgeryCategory = "豊胸系"
+        siliconeSurgery.surgeryType = "シリコン"
+        
+        // 脂肪吸引の手術
+        let lipoSurgery = Surgery(context: context)
+        lipoSurgery.id = UUID()
+        lipoSurgery.surgeryDate = Date()
+        lipoSurgery.surgeryCategory = "脂肪吸引"
+        lipoSurgery.surgeryType = "腹部"
+        
+        // 目元系の手術
+        let eyeSurgery = Surgery(context: context)
+        eyeSurgery.id = UUID()
+        eyeSurgery.surgeryDate = Date()
+        eyeSurgery.surgeryCategory = "目元系"
+        eyeSurgery.surgeryType = "二重埋没法"
+        
+        return Group {
+            AddFollowUpView(surgery: fatInjectionSurgery)
+                .environment(\.managedObjectContext, context)
+                .previewDisplayName("脂肪注入")
+            
+            AddFollowUpView(surgery: siliconeSurgery)
+                .environment(\.managedObjectContext, context)
+                .previewDisplayName("シリコン豊胸")
+            
+            AddFollowUpView(surgery: lipoSurgery)
+                .environment(\.managedObjectContext, context)
+                .previewDisplayName("脂肪吸引")
+            
+            AddFollowUpView(surgery: eyeSurgery)
+                .environment(\.managedObjectContext, context)
+                .previewDisplayName("目元系")
+        }
+    }
 }
-

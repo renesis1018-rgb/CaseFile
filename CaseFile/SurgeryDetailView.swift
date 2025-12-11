@@ -53,7 +53,8 @@ struct SurgeryDetailView: View {
             EditSurgeryView(surgery: surgery, context: viewContext)
         }
         .sheet(isPresented: $showAddFollowUpView) {
-            AddFollowUpView(surgery: surgery, context: viewContext)
+            AddFollowUpView(surgery: surgery)
+                .environment(\.managedObjectContext, viewContext)
         }
         .alert("手術データの削除", isPresented: $showDeleteAlert) {
             Button("キャンセル", role: .cancel) { }

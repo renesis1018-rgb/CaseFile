@@ -14,7 +14,7 @@ struct PatientDetailView: View {
     
     @State private var showEditPatient = false
     @State private var showAddSurgery = false
-    @State private var showAddLabData = false  // 🆕 追加
+    @State private var showAddLabData = false
     @State private var showDeleteConfirm = false
     
     // MARK: - Computed
@@ -67,11 +67,12 @@ struct PatientDetailView: View {
         }
         .sheet(isPresented: $showEditPatient) {
             EditPatientView(patient: patient)
+                .frame(minWidth: 500, minHeight: 500)  // ← 🆕 追加
         }
         .sheet(isPresented: $showAddSurgery) {
             AddSurgeryView(patient: patient, context: viewContext)
         }
-        .sheet(isPresented: $showAddLabData) {  // 🆕 追加
+        .sheet(isPresented: $showAddLabData) {
             AddLabDataView(patient: patient, context: viewContext)
         }
         .alert("患者削除の確認", isPresented: $showDeleteConfirm) {
@@ -105,7 +106,7 @@ struct PatientDetailView: View {
             
             VStack(spacing: 8) {
                 InfoRow(label: "患者ID", value: patient.patientId ?? "未設定")
-                InfoRow(label: "年齢", value: "\(patient.age)歳")
+                InfoRow(label: "年齢", value: "\(patient.age ?? 0)歳")
                 InfoRow(label: "性別", value: patient.gender ?? "未設定")
                 
                 if let name = patient.name, !name.isEmpty {
@@ -204,7 +205,6 @@ struct PatientDetailView: View {
                 
                 Spacer()
                 
-                // 🆕 血液検査登録ボタンを追加
                 Button(action: { showAddLabData = true }) {
                     Label("血液検査登録", systemImage: "plus")
                         .font(.system(size: 13))
