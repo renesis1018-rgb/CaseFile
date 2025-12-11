@@ -1,244 +1,256 @@
-//
-//  SurgeryDetailView.swift
-//  CaseFile
-//
-//  手術詳細画面（タブ表示: 手術情報・写真管理・経過情報）
-//
-
 import SwiftUI
 import CoreData
 
 struct SurgeryDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject var surgery: Surgery
     
-    @State private var selectedTab = 0
-    @State private var showEditSurgery = false
-    @State private var showDeleteConfirm = false
+    @State private var showEditView = false
+    @State private var showDeleteAlert = false
+    @State private var showAddFollowUpView = false
     
     var body: some View {
-        TabView(selection: $selectedTab) {
-            // タブ1: 手術情報
-            surgeryInfoTab
-                .tabItem {
-                    Label("手術情報", systemImage: "heart.text.square")
+        TabView {
+            // 手術情報タブ
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    surgeryInfoSection
                 }
-                .tag(0)
+                .padding()
+            }
+            .tabItem {
+                Label("手術情報", systemImage: "doc.text")
+            }
             
-            // タブ2: 写真管理
+            // 写真管理タブ
             PhotoManagementView(surgery: surgery)
                 .tabItem {
-                    Label("写真管理", systemImage: "photo.on.rectangle")
+                    Label("写真管理", systemImage: "photo.on.rectangle.angled")
                 }
-                .tag(1)
             
-            // タブ3: 経過情報
-            followUpListTab
+            // 経過情報タブ
+            followUpTab
                 .tabItem {
                     Label("経過情報", systemImage: "chart.line.uptrend.xyaxis")
                 }
-                .tag(2)
         }
-        .frame(minWidth: 900, idealWidth: 1000, minHeight: 750)
-        .navigationTitle(surgery.surgeryCategory ?? "手術詳細")
+        .navigationTitle(surgery.patient?.name ?? "患者名不明")
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Menu {
-                    Button(action: { showEditSurgery = true }) {
-                        Label("手術情報編集", systemImage: "pencil")
-                    }
-                    
-                    Divider()
-                    
-                    Button(role: .destructive, action: { showDeleteConfirm = true }) {
-                        Label("手術削除", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                Button(action: { showEditView = true }) {
+                    Label("編集", systemImage: "pencil")
+                }
+            }
+            ToolbarItem(placement: .automatic) {
+                Button(role: .destructive, action: { showDeleteAlert = true }) {
+                    Label("削除", systemImage: "trash")
+                        .foregroundColor(.red)
                 }
             }
         }
-        .sheet(isPresented: $showEditSurgery) {
+        .sheet(isPresented: $showEditView) {
             EditSurgeryView(surgery: surgery, context: viewContext)
         }
-        .alert("手術削除の確認", isPresented: $showDeleteConfirm) {
-            Button("キャンセル", role: .cancel) {}
+        .sheet(isPresented: $showAddFollowUpView) {
+            AddFollowUpView(surgery: surgery, context: viewContext)
+        }
+        .alert("手術データの削除", isPresented: $showDeleteAlert) {
+            Button("キャンセル", role: .cancel) { }
             Button("削除", role: .destructive) {
                 deleteSurgery()
             }
         } message: {
-            Text("この手術と関連する全てのデータ（写真、経過情報）が削除されます。この操作は取り消せません。")
+            Text("この手術データを削除しますか？")
         }
     }
     
-    // MARK: - 手術情報タブ
-    private var surgeryInfoTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // 基本情報
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("基本情報")
-                        .font(.headline)
-                    
-                    if let date = surgery.surgeryDate {
-                        HStack {
-                            Text("手術日")
-                                .frame(width: 120, alignment: .leading)
-                            Text(date.formatted(date: .long, time: .omitted))
-                        }
-                    }
-                    
-                    if let category = surgery.surgeryCategory {
-                        HStack {
-                            Text("カテゴリ")
-                                .frame(width: 120, alignment: .leading)
-                            Text(category)
-                        }
-                    }
-                    
-                    if let type = surgery.surgeryType {
-                        HStack {
-                            Text("術式")
-                                .frame(width: 120, alignment: .leading)
-                            Text(type)
-                        }
-                    }
-                }
-                
+    // MARK: - 手術情報セクション
+    private var surgeryInfoSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // 手術日
+            if let surgeryDate = surgery.surgeryDate {
+                infoRow(label: "手術日", value: formattedDate(surgeryDate))
+            }
+            
+            // 手術カテゴリー
+            if let category = surgery.surgeryCategory {
+                infoRow(label: "カテゴリー", value: category)
+            }
+            
+            // 手術タイプ
+            if let type = surgery.surgeryType {
+                infoRow(label: "手術タイプ", value: type)
+            }
+            
+            // Procedure（手術内容の詳細）
+            if let procedure = surgery.procedure, !procedure.isEmpty {
+                infoRow(label: "手術内容", value: procedure)
+            }
+            
+            // 備考
+            if let notes = surgery.notes, !notes.isEmpty {
                 Divider()
-                
-                // 術前患者状態
-                if shouldShowPatientStatus {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("術前患者状態")
-                            .font(.headline)
-                        
-                        if let height = surgery.height?.doubleValue, height > 0 {
-                            HStack {
-                                Text("身長")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(String(format: "%.1f cm", height * 100))
-                            }
-                        }
-                        
-                        if let weight = surgery.bodyWeight?.doubleValue, weight > 0 {
-                            HStack {
-                                Text("体重")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(String(format: "%.1f kg", weight))
-                            }
-                        }
-                        
-                        if let bmi = surgery.bmi?.doubleValue, bmi > 0 {
-                            HStack {
-                                Text("BMI")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(String(format: "%.1f", bmi))
-                            }
-                        }
-                    }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("備考")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                     
-                    Divider()
-                }
-                
-                // 手術内容
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("手術内容")
-                        .font(.headline)
-                    
-                    if surgery.surgeryType == "脂肪注入豊胸" {
-                        if let donor = surgery.donorSite {
-                            HStack {
-                                Text("採取部位")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(donor)
-                            }
-                        }
-                        
-                        if let injR = surgery.injectionVolumeR?.doubleValue, injR > 0 {
-                            HStack {
-                                Text("注入量 右")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(String(format: "%.0f cc", injR))
-                            }
-                        }
-                        
-                        if let injL = surgery.injectionVolumeL?.doubleValue, injL > 0 {
-                            HStack {
-                                Text("注入量 左")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(String(format: "%.0f cc", injL))
-                            }
-                        }
-                    }
-                    
-                    if surgery.surgeryType == "シリコンバッグ豊胸" {
-                        if let sizeR = surgery.implantSizeR?.doubleValue, sizeR > 0 {
-                            HStack {
-                                Text("インプラント 右")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(String(format: "%.0f cc", sizeR))
-                            }
-                        }
-                        
-                        if let sizeL = surgery.implantSizeL?.doubleValue, sizeL > 0 {
-                            HStack {
-                                Text("インプラント 左")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(String(format: "%.0f cc", sizeL))
-                            }
-                        }
-                        
-                        if let manufacturer = surgery.implantManufacturer {
-                            HStack {
-                                Text("製造元")
-                                    .frame(width: 120, alignment: .leading)
-                                Text(manufacturer)
-                            }
-                        }
-                    }
+                    Text(notes)
+                        .font(.body)
+                        .foregroundColor(.primary)
                 }
             }
-            .padding()
+        }
+    }
+    
+    // MARK: - 情報行ヘルパー
+    private func infoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 120, alignment: .leading)
+            
+            Text(value)
+                .font(.body)
+                .foregroundColor(.primary)
+            
+            Spacer()
         }
     }
     
     // MARK: - 経過情報タブ
-    private var followUpListTab: some View {
+    private var followUpTab: some View {
         VStack {
-            Text("経過情報機能は準備中です")
-                .foregroundColor(.secondary)
-                .padding()
+            // 経過情報登録ボタン
+            Button(action: { showAddFollowUpView = true }) {
+                Label("経過情報登録", systemImage: "plus.circle.fill")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .cornerRadius(12)
+                    .shadow(radius: 2)
+            }
+            .padding(.horizontal)
+            .padding(.top, 12)
+            
+            // 経過情報リスト
+            if let followUps = surgery.followUps?.allObjects as? [FollowUp], !followUps.isEmpty {
+                List {
+                    ForEach(followUpsSorted(followUps), id: \.id) { followUp in
+                        FollowUpRowView(followUp: followUp)
+                    }
+                    .onDelete(perform: deleteFollowUp)
+                }
+                .listStyle(PlainListStyle())
+            } else {
+                Spacer()
+                Text("経過情報がまだ登録されていません")
+                    .foregroundColor(.secondary)
+                    .font(.headline)
+                Spacer()
+            }
         }
     }
     
-    // MARK: - Computed Properties
-    private var shouldShowPatientStatus: Bool {
-        surgery.surgeryCategory == "豊胸系" || surgery.surgeryCategory == "脂肪吸引"
-    }
-    
-    // MARK: - Actions
+    // MARK: - 削除処理
     private func deleteSurgery() {
         viewContext.delete(surgery)
         
         do {
             try viewContext.save()
+            dismiss()
         } catch {
-            print("手術削除エラー: \(error)")
+            print("❌ 手術データ削除エラー: \(error.localizedDescription)")
         }
+    }
+    
+    // MARK: - 経過情報の削除
+    private func deleteFollowUp(at offsets: IndexSet) {
+        guard let followUps = surgery.followUps?.allObjects as? [FollowUp] else { return }
+        let sortedFollowUps = followUpsSorted(followUps)
+        
+        offsets.forEach { index in
+            let followUp = sortedFollowUps[index]
+            viewContext.delete(followUp)
+        }
+        
+        do {
+            try viewContext.save()
+        } catch {
+            print("❌ 経過情報削除エラー: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - 経過情報ソート（新しい順）
+    private func followUpsSorted(_ followUps: [FollowUp]) -> [FollowUp] {
+        followUps.sorted { ($0.followUpDate ?? Date.distantPast) > ($1.followUpDate ?? Date.distantPast) }
+    }
+    
+    // MARK: - 日付フォーマット
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
     }
 }
 
-#Preview {
-    let context = PersistenceController.preview.container.viewContext
-    let surgery = Surgery(context: context)
-    surgery.id = UUID()
-    surgery.surgeryDate = Date()
-    surgery.surgeryCategory = "豊胸系"
-    surgery.surgeryType = "脂肪注入豊胸"
+// MARK: - 経過情報行ビュー
+struct FollowUpRowView: View {
+    let followUp: FollowUp
     
-    return NavigationView {
-        SurgeryDetailView(surgery: surgery)
-            .environment(\.managedObjectContext, context)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 日付
+            if let date = followUp.followUpDate {
+                Text(formattedDate(date))
+                    .font(.headline)
+                    .foregroundColor(.primary)
+            }
+            
+            // 備考プレビュー
+            if let notes = followUp.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+    
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/MM/dd (E)"
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - プレビュー
+struct SurgeryDetailView_Previews: PreviewProvider {
+    static var previews: some View {
+        let context = PersistenceController.preview.container.viewContext
+        
+        let patient = Patient(context: context)
+        patient.id = UUID()
+        patient.name = "山田 太郎"
+        
+        let surgery = Surgery(context: context)
+        surgery.id = UUID()
+        surgery.surgeryDate = Date()
+        surgery.surgeryCategory = "豊胸系"
+        surgery.surgeryType = "脂肪注入"
+        surgery.procedure = "脂肪注入 (ピュアグラフト)"
+        surgery.patient = patient
+        
+        return NavigationView {
+            SurgeryDetailView(surgery: surgery)
+                .environment(\.managedObjectContext, context)
+        }
     }
 }
