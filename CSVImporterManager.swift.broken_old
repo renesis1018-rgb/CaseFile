@@ -1,0 +1,550 @@
+import Foundation
+import CoreData
+import SwiftUI
+import Combine
+
+// MARK: - Import Step
+enum ImportStep: CaseIterable {
+    case patient
+    case surgery
+    case labData
+    case followUp
+    
+    var title: String {
+        switch self {
+        case .patient: return "患者基本情報"
+        case .surgery: return "手術情報"
+        case .labData: return "血液検査"
+        case .followUp: return "経過情報"
+        }
+    }
+    
+    var fileName: String {
+        switch self {
+        case .patient: return "01_患者基本情報.csv"
+        case .surgery: return "03_手術情報.csv"
+        case .labData: return "02_血液検査.csv"
+        case .followUp: return "04_経過情報.csv"
+        }
+    }
+}
+
+// MARK: - Import Error
+struct ImportError: Identifiable {
+    let id = UUID()
+    let step: ImportStep
+    let message: String
+}
+
+// MARK: - CSV Importer Manager
+class CSVImporterManager: ObservableObject {
+    @Published var isImporting = false
+    @Published var currentStep: ImportStep?
+    @Published var progress: Double = 0
+    @Published var successCount: [ImportStep: Int] = [:]
+    @Published var errors: [ImportError] = []
+    
+    private let context: NSManagedObjectContext
+    
+    init(context: NSManagedObjectContext) {
+        self.context = context
+    }
+    
+    // MARK: - Main Import Function
+    func importAllCSVs(patientURL: URL, surgeryURL: URL, labDataURL: URL, followUpURL: URL) async {
+        await MainActor.run {
+            isImporting = true
+            progress = 0
+            successCount = [:]
+            errors = []
+        }
+        
+        // Step 1: Import Patients
+        await importStep(.patient, url: patientURL) { url in
+            try await self.importPatients(from: url)
+        }
+        
+        // Step 2: Import Surgery
+        await importStep(.surgery, url: surgeryURL) { url in
+            try await self.importSurgeries(from: url)
+        }
+        
+        // Step 3: Import Lab Data
+        await importStep(.labData, url: labDataURL) { url in
+            try await self.importLabData(from: url)
+        }
+        
+        // Step 4: Import Follow-Up
+        await importStep(.followUp, url: followUpURL) { url in
+            try await self.importFollowUps(from: url)
+        }
+        
+        await MainActor.run {
+            isImporting = false
+            currentStep = nil
+        }
+    }
+    
+    private func importStep(_ step: ImportStep, url: URL, task: (URL) async throws -> Int) async {
+        await MainActor.run { currentStep = step }
+        
+        do {
+            let count = try await task(url)
+            await MainActor.run {
+                successCount[step] = count
+                progress += 0.25
+            }
+        } catch {
+            await MainActor.run {
+                errors.append(ImportError(step: step, message: error.localizedDescription))
+                progress += 0.25
+            }
+        }
+    }
+    
+    // MARK: - Import Patients
+    private func importPatients(from url: URL) async throws -> Int {
+        let csvData = try String(contentsOf: url, encoding: .utf8)
+        let lines = csvData.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        
+        guard lines.count > 1 else { return 0 }
+        
+        var importCount = 0
+        
+        for line in lines.dropFirst() {
+            let columns = line.components(separatedBy: ",")
+            guard columns.count >= 12 else { continue }
+            
+            // Parse date (Ope日)
+            let dateString = columns[0].trimmingCharacters(in: .whitespaces)
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            dateFormatter.locale = Locale(identifier: "ja_JP")
+            guard let registeredDate = dateFormatter.date(from: dateString) else { continue }
+            
+            let patientId = columns[1].trimmingCharacters(in: .whitespaces)
+            
+            // Check if patient already exists
+            let fetchRequest: NSFetchRequest<Patient> = Patient.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "patientId == %@ AND registeredDate == %@", patientId, registeredDate as NSDate)
+            
+            let existingPatients = try context.fetch(fetchRequest)
+            if !existingPatients.isEmpty {
+                continue // Skip duplicate
+            }
+            
+            // Create new patient
+            let patient = Patient(context: context)
+            patient.id = UUID()
+            patient.registeredDate = registeredDate
+            patient.patientId = patientId
+            
+            // 術式 → notes
+            let procedureType = columns[2].trimmingCharacters(in: .whitespaces)
+            if !procedureType.isEmpty {
+                patient.notes = "術式: \(procedureType)"
+            }
+            
+            // Age
+            if let age = Int16(columns[3].trimmingCharacters(in: .whitespaces)) {
+                patient.age = age
+            }
+            
+            // Height (m)
+            if let height = Double(columns[4].trimmingCharacters(in: .whitespaces)) {
+                patient.height = height
+            }
+            
+            // Body Weight (kg)
+            if let weight = Double(columns[5].trimmingCharacters(in: .whitespaces)) {
+                patient.bodyWeightKg = weight
+            }
+            
+            // BMI
+            if let bmi = Double(columns[6].trimmingCharacters(in: .whitespaces)) {
+                patient.bmi = bmi
+            }
+            
+            // Smoking History
+            patient.smokingHistory = columns[7].trimmingCharacters(in: .whitespaces)
+            
+            // Breastfeeding History - ✅ 正しい属性名: breastFeeding
+            patient.breastFeeding = columns[8].trimmingCharacters(in: .whitespaces)
+            
+            // Number of Procedures
+            if let numberOfProcedures = Int16(columns[9].trimmingCharacters(in: .whitespaces)) {
+                patient.numberOfProcedures = numberOfProcedures
+            }
+            
+            importCount += 1
+        }
+        
+        try context.save()
+        return importCount
+    }
+    
+    // MARK: - Import Surgeries
+    private func importSurgeries(from url: URL) async throws -> Int {
+        let csvData = try String(contentsOf: url, encoding: .utf8)
+        let lines = csvData.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        
+        guard lines.count > 1 else { return 0 }
+        
+        var importCount = 0
+        
+        for line in lines.dropFirst() {
+            let columns = line.components(separatedBy: ",")
+            guard columns.count >= 18 else { continue }
+            
+            // Parse date and patient ID
+            let dateString = columns[0].trimmingCharacters(in: .whitespaces)
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            dateFormatter.locale = Locale(identifier: "ja_JP")
+            guard let surgeryDate = dateFormatter.date(from: dateString) else { continue }
+            
+            let patientId = columns[1].trimmingCharacters(in: .whitespaces)
+            
+            // Find corresponding patient
+            let patientFetchRequest: NSFetchRequest<Patient> = Patient.fetchRequest()
+            patientFetchRequest.predicate = NSPredicate(format: "patientId == %@ AND registeredDate == %@", patientId, surgeryDate as NSDate)
+            
+            guard let patient = try context.fetch(patientFetchRequest).first else {
+                continue // Patient not found
+            }
+            
+            // Create surgery
+            let surgery = Surgery(context: context)
+            surgery.id = UUID()
+            surgery.surgeryDate = surgeryDate
+            surgery.patient = patient
+            
+            // NAC-IMF (R)
+            if let nacImfRight = Double(columns[2].trimmingCharacters(in: .whitespaces)) {
+                surgery.nacImfRight = nacImfRight
+            }
+            
+            // NAC-IMF_on_stretch (R)
+            if let nacImfStretchRight = Double(columns[3].trimmingCharacters(in: .whitespaces)) {
+                surgery.nacImfStretchRight = nacImfStretchRight
+            }
+            
+            // NAC-IMF (L)
+            if let nacImfLeft = Double(columns[4].trimmingCharacters(in: .whitespaces)) {
+                surgery.nacImfLeft = nacImfLeft
+            }
+            
+            // NAC-IMF_on_stretch (L)
+            if let nacImfStretchLeft = Double(columns[5].trimmingCharacters(in: .whitespaces)) {
+                surgery.nacImfStretchLeft = nacImfStretchLeft
+            }
+            
+            // Skin_thickness (R)
+            if let skinThicknessRight = Double(columns[6].trimmingCharacters(in: .whitespaces)) {
+                surgery.skinThicknessRight = skinThicknessRight
+            }
+            
+            // Skin_thickness (L)
+            if let skinThicknessLeft = Double(columns[7].trimmingCharacters(in: .whitespaces)) {
+                surgery.skinThicknessLeft = skinThicknessLeft
+            }
+            
+            // 採取部位 (Donor Site)
+            surgery.donorSite = columns[8].trimmingCharacters(in: .whitespaces)
+            
+            // Injection_Volume (R)
+            if let injectionVolumeR = Double(columns[9].trimmingCharacters(in: .whitespaces)) {
+                surgery.injectionVolumeR = injectionVolumeR
+            }
+            
+            // Injection_Volume (L)
+            if let injectionVolumeL = Double(columns[10].trimmingCharacters(in: .whitespaces)) {
+                surgery.injectionVolumeL = injectionVolumeL
+            }
+            
+            // 皮下(R)
+            if let subcutaneousRight = Double(columns[11].trimmingCharacters(in: .whitespaces)) {
+                surgery.subcutaneousRight = subcutaneousRight
+            }
+            
+            // 乳腺下(R)
+            if let subglandularRight = Double(columns[12].trimmingCharacters(in: .whitespaces)) {
+                surgery.subglandularRight = subglandularRight
+            }
+            
+            // 大胸筋内下(R)
+            if let submuscularRight = Double(columns[13].trimmingCharacters(in: .whitespaces)) {
+                surgery.submuscularRight = submuscularRight
+            }
+            
+            // 皮下(L)
+            if let subcutaneousLeft = Double(columns[14].trimmingCharacters(in: .whitespaces)) {
+                surgery.subcutaneousLeft = subcutaneousLeft
+            }
+            
+            // 乳腺下(L)
+            if let subglandularLeft = Double(columns[15].trimmingCharacters(in: .whitespaces)) {
+                surgery.subglandularLeft = subglandularLeft
+            }
+            
+            // 大胸筋内下(L)
+            if let submuscularLeft = Double(columns[16].trimmingCharacters(in: .whitespaces)) {
+                surgery.submuscularLeft = submuscularLeft
+            }
+            
+            // デコルテ(R)
+            if let decolleteRight = Double(columns[17].trimmingCharacters(in: .whitespaces)) {
+                surgery.decolleteRight = decolleteRight
+            }
+            
+            // デコルテ(L)
+            if columns.count >= 19 {
+                if let decolleteLeft = Double(columns[18].trimmingCharacters(in: .whitespaces)) {
+                    surgery.decolleteLeft = decolleteLeft
+                }
+            }
+            
+            importCount += 1
+        }
+        
+        try context.save()
+        return importCount
+    }
+    
+    // MARK: - Import Lab Data
+    private func importLabData(from url: URL) async throws -> Int {
+        let csvData = try String(contentsOf: url, encoding: .utf8)
+        let lines = csvData.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        
+        guard lines.count > 1 else { return 0 }
+        
+        var importCount = 0
+        
+        for line in lines.dropFirst() {
+            let columns = line.components(separatedBy: ",")
+            guard columns.count >= 28 else { continue }
+            
+            // Parse date and patient ID
+            let dateString = columns[0].trimmingCharacters(in: .whitespaces)
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            dateFormatter.locale = Locale(identifier: "ja_JP")
+            guard let testDate = dateFormatter.date(from: dateString) else { continue }
+            
+            let patientId = columns[1].trimmingCharacters(in: .whitespaces)
+            
+            // Find corresponding Surgery (LabData is related to Surgery, not directly to Patient)
+            let surgeryFetchRequest: NSFetchRequest<Surgery> = Surgery.fetchRequest()
+            surgeryFetchRequest.predicate = NSPredicate(format: "patient.patientId == %@ AND surgeryDate == %@", patientId, testDate as NSDate)
+            
+            guard let surgery = try context.fetch(surgeryFetchRequest).first else {
+                continue // Surgery not found
+            }
+            
+            // Create lab data
+            let labData = LabData(context: context)
+            labData.id = UUID()
+            labData.surgery = surgery  // ✅ 修正: patient ではなく surgery
+            
+            // 白血球数(WBC)
+            if let wbc = Double(columns[2].trimmingCharacters(in: .whitespaces)) {
+                labData.wbc = wbc
+            }
+            
+            // 赤血球数(RBC)
+            if let rbc = Double(columns[3].trimmingCharacters(in: .whitespaces)) {
+                labData.rbc = rbc
+            }
+            
+            // 血色素量(Hb)
+            if let hemoglobin = Double(columns[4].trimmingCharacters(in: .whitespaces)) {
+                labData.hemoglobin = hemoglobin
+            }
+            
+            // ヘマトクリット(Ht)
+            if let hematocrit = Double(columns[5].trimmingCharacters(in: .whitespaces)) {
+                labData.hematocrit = hematocrit
+            }
+            
+            // MCV
+            if let mcv = Double(columns[6].trimmingCharacters(in: .whitespaces)) {
+                labData.mcv = mcv
+            }
+            
+            // MCH
+            if let mch = Double(columns[7].trimmingCharacters(in: .whitespaces)) {
+                labData.mch = mch
+            }
+            
+            // MCHC
+            if let mchc = Double(columns[8].trimmingCharacters(in: .whitespaces)) {
+                labData.mchc = mchc
+            }
+            
+            // 血小板数
+            if let plateletCount = Double(columns[9].trimmingCharacters(in: .whitespaces)) {
+                labData.plateletCount = plateletCount
+            }
+            
+            // 総蛋白(TP)
+            if let totalProtein = Double(columns[10].trimmingCharacters(in: .whitespaces)) {
+                labData.totalProtein = totalProtein
+            }
+            
+            // 尿酸(UA)
+            if let uricAcid = Double(columns[11].trimmingCharacters(in: .whitespaces)) {
+                labData.uricAcid = uricAcid
+            }
+            
+            // 尿素窒素(UN)
+            if let bloodUreaNitrogen = Double(columns[12].trimmingCharacters(in: .whitespaces)) {
+                labData.bloodUreaNitrogen = bloodUreaNitrogen
+            }
+            
+            // クレアチニン(CREA)
+            if let creatinine = Double(columns[13].trimmingCharacters(in: .whitespaces)) {
+                labData.creatinine = creatinine
+            }
+            
+            // 総コレステロール
+            if let totalCholesterol = Double(columns[14].trimmingCharacters(in: .whitespaces)) {
+                labData.totalCholesterol = totalCholesterol
+            }
+            
+            // 中性脂肪(TG)
+            if let triglyceride = Double(columns[15].trimmingCharacters(in: .whitespaces)) {
+                labData.triglyceride = triglyceride
+            }
+            
+            // 総ビリルビン
+            if let totalBilirubin = Double(columns[16].trimmingCharacters(in: .whitespaces)) {
+                labData.totalBilirubin = totalBilirubin
+            }
+            
+            // 直接ビリルビン
+            if let directBilirubin = Double(columns[17].trimmingCharacters(in: .whitespaces)) {
+                labData.directBilirubin = directBilirubin
+            }
+            
+            // AST(GOT)
+            if let ast = Double(columns[18].trimmingCharacters(in: .whitespaces)) {
+                labData.ast = ast
+            }
+            
+            // ALT(GPT)
+            if let alt = Double(columns[19].trimmingCharacters(in: .whitespaces)) {
+                labData.alt = alt
+            }
+            
+            // γ-GTP
+            if let gammaGt = Double(columns[20].trimmingCharacters(in: .whitespaces)) {
+                labData.gammaGt = gammaGt
+            }
+            
+            // ALP
+            if let alp = Double(columns[21].trimmingCharacters(in: .whitespaces)) {
+                labData.alp = alp
+            }
+            
+            // LDH
+            if let ldh = Double(columns[22].trimmingCharacters(in: .whitespaces)) {
+                labData.ldh = ldh
+            }
+            
+            // ナトリウム(Na)
+            if let sodium = Double(columns[23].trimmingCharacters(in: .whitespaces)) {
+                labData.sodium = sodium
+            }
+            
+            // カリウム(K)
+            if let potassium = Double(columns[24].trimmingCharacters(in: .whitespaces)) {
+                labData.potassium = potassium
+            }
+            
+            // クロール(Cl)
+            if let chloride = Double(columns[25].trimmingCharacters(in: .whitespaces)) {
+                labData.chloride = chloride
+            }
+            
+            // 血糖(Glu)
+            if let glucose = Double(columns[26].trimmingCharacters(in: .whitespaces)) {
+                labData.glucose = glucose
+            }
+            
+            // HbA1c
+            if let hba1c = Double(columns[27].trimmingCharacters(in: .whitespaces)) {
+                labData.hba1c = hba1c
+            }
+            
+            importCount += 1
+        }
+        
+        try context.save()
+        return importCount
+    }
+    
+    // MARK: - Import Follow-Ups
+    private func importFollowUps(from url: URL) async throws -> Int {
+        let csvData = try String(contentsOf: url, encoding: .utf8)
+        let lines = csvData.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        
+        guard lines.count > 1 else { return 0 }
+        
+        var importCount = 0
+        
+        for line in lines.dropFirst() {
+            let columns = line.components(separatedBy: ",")
+            guard columns.count >= 11 else { continue }
+            
+            // Parse date and patient ID
+            let dateString = columns[0].trimmingCharacters(in: .whitespaces)
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM/dd"
+            dateFormatter.locale = Locale(identifier: "ja_JP")
+            guard let baseDate = dateFormatter.date(from: dateString) else { continue }
+            
+            let patientId = columns[1].trimmingCharacters(in: .whitespaces)
+            
+            // Find corresponding Surgery (FollowUp is related to Surgery, not directly to Patient)
+            let surgeryFetchRequest: NSFetchRequest<Surgery> = Surgery.fetchRequest()
+            surgeryFetchRequest.predicate = NSPredicate(format: "patient.patientId == %@ AND surgeryDate == %@", patientId, baseDate as NSDate)
+            
+            guard let surgery = try context.fetch(surgeryFetchRequest).first else {
+                continue // Surgery not found
+            }
+            
+            // Create follow-up
+            let followUp = FollowUp(context: context)
+            followUp.id = UUID()
+            followUp.surgery = surgery  // ✅ 修正: patient ではなく surgery
+            
+            // 経過期間 (Timing)
+            followUp.timing = columns[2].trimmingCharacters(in: .whitespaces)
+            
+            // Vectra(R) → vectraVolumeRight ✅
+            if let vectraVolumeRight = Double(columns[7].trimmingCharacters(in: .whitespaces)) {
+                followUp.vectraVolumeRight = vectraVolumeRight
+            }
+            
+            // Vectra(L) → vectraVolumeLeft ✅
+            if let vectraVolumeLeft = Double(columns[8].trimmingCharacters(in: .whitespaces)) {
+                followUp.vectraVolumeLeft = vectraVolumeLeft
+            }
+            
+            // 体重
+            if let bodyWeight = Double(columns[9].trimmingCharacters(in: .whitespaces)) {
+                followUp.bodyWeight = bodyWeight
+            }
+            
+            // BREAST-Qスコア
+            if let breastQScore = Double(columns[10].trimmingCharacters(in: .whitespaces)) {
+                followUp.breastQScore = Int16(breastQScore)
+            }
+            
+            importCount += 1
+        }
+        
+        try context.save()
+        return importCount
+    }
+}

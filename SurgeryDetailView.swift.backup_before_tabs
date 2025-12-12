@@ -1,0 +1,392 @@
+//
+//  SurgeryDetailView.swift
+//  CaseFile
+//
+//  手術詳細画面（写真管理ボタン付き）
+//
+
+import SwiftUI
+import CoreData
+
+struct SurgeryDetailView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @ObservedObject var surgery: Surgery
+    
+    @State private var showEditSurgery = false
+    @State private var showPhotoManagement = false
+    @State private var showDeleteConfirm = false
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // 基本情報
+                basicInfoSection
+                
+                Divider()
+                
+                // 術前患者状態
+                if shouldShowPatientStatus {
+                    preOpPatientStatusSection
+                    Divider()
+                }
+                
+                // 術前測定値
+                if shouldShowMeasurements {
+                    preOpMeasurementsSection
+                    Divider()
+                }
+                
+                // 手術内容
+                surgeryDetailsSection
+                
+                Divider()
+                
+                // 経過情報
+                followUpSection
+            }
+            .padding()
+        }
+        .navigationTitle(surgery.surgeryCategory ?? "手術詳細")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button(action: { showPhotoManagement = true }) {
+                    Label("写真管理", systemImage: "photo.on.rectangle")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    Button(action: { showEditSurgery = true }) {
+                        Label("手術情報編集", systemImage: "pencil")
+                    }
+                    
+                    Divider()
+                    
+                    Button(role: .destructive, action: { showDeleteConfirm = true }) {
+                        Label("手術削除", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .sheet(isPresented: $showPhotoManagement) {
+            PhotoManagementView(surgery: surgery)
+        }
+        .sheet(isPresented: $showEditSurgery) {
+            EditSurgeryView(surgery: surgery, context: viewContext)
+        }
+        .alert("手術削除の確認", isPresented: $showDeleteConfirm) {
+            Button("キャンセル", role: .cancel) {}
+            Button("削除", role: .destructive) {
+                deleteSurgery()
+            }
+        } message: {
+            Text("この手術と関連する全てのデータ（写真、経過情報）が削除されます。この操作は取り消せません。")
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var shouldShowPatientStatus: Bool {
+        surgery.surgeryCategory == "豊胸系" || surgery.surgeryCategory == "脂肪吸引"
+    }
+    
+    private var shouldShowMeasurements: Bool {
+        surgery.surgeryCategory == "豊胸系"
+    }
+    
+    private var isFatInjection: Bool {
+        surgery.surgeryCategory == "豊胸系" && surgery.surgeryType == "脂肪注入"
+    }
+    
+    private var isSilicone: Bool {
+        surgery.surgeryCategory == "豊胸系" && surgery.surgeryType == "シリコン"
+    }
+    
+    private var isLiposuction: Bool {
+        surgery.surgeryCategory == "脂肪吸引"
+    }
+    
+    // MARK: - Basic Info Section
+    
+    private var basicInfoSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("基本情報")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button(action: { showEditSurgery = true }) {
+                    Label("編集", systemImage: "pencil")
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            
+            VStack(spacing: 8) {
+                if let date = surgery.surgeryDate {
+                    InfoRow(label: "手術日", value: formatDate(date))
+                }
+                InfoRow(label: "カテゴリ", value: surgery.surgeryCategory ?? "未設定")
+                InfoRow(label: "術式", value: surgery.surgeryType ?? "未設定")
+                
+                if let notes = surgery.notes, !notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("備考")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                        Text(notes)
+                            .font(.system(size: 13))
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .cornerRadius(6)
+                    }
+                }
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .cornerRadius(10)
+        }
+    }
+    
+    // MARK: - Pre-Op Patient Status Section
+    
+    private var preOpPatientStatusSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("術前患者状態")
+                .font(.title2)
+                .fontWeight(.bold)
+            
+            VStack(spacing: 8) {
+                if let height = surgery.height {
+                    InfoRow(label: "身長", value: NSNumber(value: height.doubleValue * 100), unit: "cm")
+                }
+                InfoRow(label: "体重", value: surgery.bodyWeight, unit: "kg")
+                InfoRow(label: "BMI", value: surgery.bmi)
+                
+                if let smoking = surgery.smokingHistory {
+                    InfoRow(label: "喫煙歴", value: smoking)
+                }
+                if let breastfeeding = surgery.breastfeedingHistory {
+                    InfoRow(label: "授乳歴", value: breastfeeding)
+                }
+                if (surgery.numberOfProcedures?.int16Value ?? 0) > 0 {
+                    InfoRow(label: "術式回数", value: surgery.numberOfProcedures, unit: "回")
+                }
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .cornerRadius(10)
+        }
+    }
+    
+    // MARK: - Pre-Op Measurements Section
+    
+    private var preOpMeasurementsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("術前測定値")
+                .font(.title2)
+                .fontWeight(.bold)
+            
+            VStack(spacing: 8) {
+                InfoRow(label: "Vectra術前(R)", value: surgery.preOpVectraR, unit: "cc")
+                InfoRow(label: "Vectra術前(L)", value: surgery.preOpVectraL, unit: "cc")
+                InfoRow(label: "NAC-IMF(R)", value: surgery.nacImfRight, unit: "cm")
+                InfoRow(label: "NAC-IMF(L)", value: surgery.nacImfLeft, unit: "cm")
+                InfoRow(label: "NAC-IMF stretch(R)", value: surgery.nacImfStretchRight, unit: "cm")
+                InfoRow(label: "NAC-IMF stretch(L)", value: surgery.nacImfStretchLeft, unit: "cm")
+                InfoRow(label: "Skin thickness(R)", value: surgery.skinThicknessRight, unit: "mm")
+                InfoRow(label: "Skin thickness(L)", value: surgery.skinThicknessLeft, unit: "mm")
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .cornerRadius(10)
+        }
+    }
+    
+    // MARK: - Surgery Details Section
+    
+    @ViewBuilder
+    private var surgeryDetailsSection: some View {
+        if isFatInjection {
+            fatInjectionDetailsSection
+        } else if isSilicone {
+            siliconeDetailsSection
+        } else if isLiposuction {
+            liposuctionDetailsSection
+        } else {
+            EmptyView()
+        }
+    }
+    
+    private var fatInjectionDetailsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("手術内容（脂肪注入）")
+                .font(.title2)
+                .fontWeight(.bold)
+            
+            VStack(spacing: 8) {
+                if let donor = surgery.donorSite {
+                    InfoRow(label: "採取部位", value: donor)
+                }
+                InfoRow(label: "注入量(R)", value: surgery.injectionVolumeR, unit: "cc")
+                InfoRow(label: "注入量(L)", value: surgery.injectionVolumeL, unit: "cc")
+                
+                Divider()
+                
+                InfoRow(label: "皮下(R)", value: surgery.subcutaneousRight, unit: "cc")
+                InfoRow(label: "皮下(L)", value: surgery.subcutaneousLeft, unit: "cc")
+                InfoRow(label: "乳腺下(R)", value: surgery.subglandularRight, unit: "cc")
+                InfoRow(label: "乳腺下(L)", value: surgery.subglandularLeft, unit: "cc")
+                InfoRow(label: "大胸筋内下(R)", value: surgery.submuscularRight, unit: "cc")
+                InfoRow(label: "大胸筋内下(L)", value: surgery.submuscularLeft, unit: "cc")
+                InfoRow(label: "デコルテ(R)", value: surgery.decolleteRight, unit: "cc")
+                InfoRow(label: "デコルテ(L)", value: surgery.decolleteLeft, unit: "cc")
+                
+                Divider()
+                
+                InfoRow(label: "VASER使用", value: surgery.vaserUsed)
+                InfoRow(label: "Aquicell使用", value: surgery.aquicellUsed)
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .cornerRadius(10)
+        }
+    }
+    
+    private var siliconeDetailsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("インプラント情報")
+                .font(.title2)
+                .fontWeight(.bold)
+            
+            VStack(spacing: 8) {
+                InfoRow(label: "サイズ(R)", value: surgery.implantSizeR, unit: "cc")
+                InfoRow(label: "サイズ(L)", value: surgery.implantSizeL, unit: "cc")
+                
+                if let manufacturer = surgery.implantManufacturer {
+                    InfoRow(label: "メーカー", value: manufacturer)
+                }
+                if let shape = surgery.implantShape {
+                    InfoRow(label: "形状", value: shape)
+                }
+                if let insertion = surgery.insertionPosition {
+                    InfoRow(label: "挿入位置", value: insertion)
+                }
+                if let incision = surgery.incisionPosition {
+                    InfoRow(label: "切開位置", value: incision)
+                }
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .cornerRadius(10)
+        }
+    }
+    
+    private var liposuctionDetailsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("脂肪吸引内容")
+                .font(.title2)
+                .fontWeight(.bold)
+            
+            VStack(spacing: 8) {
+                if let areasJSON = surgery.liposuctionAreas,
+                   let data = areasJSON.data(using: .utf8),
+                   let areas = try? JSONDecoder().decode([String].self, from: data) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("吸引部位")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                        ForEach(areas, id: \.self) { area in
+                            Text("・\(area)")
+                                .font(.system(size: 13))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                
+                InfoRow(label: "吸引量(R)", value: surgery.liposuctionVolumeR, unit: "cc")
+                InfoRow(label: "吸引量(L)", value: surgery.liposuctionVolumeL, unit: "cc")
+                
+                if let device = surgery.liposuctionDevice {
+                    InfoRow(label: "使用機器", value: device)
+                }
+                if let anesthesia = surgery.anesthesiaMethod {
+                    InfoRow(label: "麻酔方法", value: anesthesia)
+                }
+            }
+            .padding()
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .cornerRadius(10)
+        }
+    }
+    
+    // MARK: - Follow-Up Section
+    
+    private var followUpSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("経過情報")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button(action: {}) {
+                    Label("経過追加", systemImage: "plus")
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(true)  // Phase 4で実装
+            }
+            
+            VStack(spacing: 12) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 40))
+                    .foregroundColor(.secondary)
+                Text("経過情報機能は今後実装予定です")
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(40)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+            .cornerRadius(10)
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func deleteSurgery() {
+        viewContext.delete(surgery)
+        
+        do {
+            try viewContext.save()
+        } catch {
+            print("⚠️ 手術削除エラー: \(error)")
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy年M月d日"
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    NavigationView {
+        SurgeryDetailView(surgery: PersistenceController.preview.container.viewContext.registeredObjects.first(where: { $0 is Surgery }) as! Surgery)
+    }
+    .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+}

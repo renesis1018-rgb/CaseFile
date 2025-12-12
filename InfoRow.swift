@@ -1,0 +1,69 @@
+//
+//  InfoRow.swift
+//  CaseFile
+//
+//  汎用情報表示コンポーネント
+//
+
+import SwiftUI
+
+struct InfoRow: View {
+    let label: String
+    let value: String
+    var valueColor: Color = .primary
+    var labelWidth: CGFloat = 140
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+                .frame(width: labelWidth, alignment: .leading)
+            
+            Text(value)
+                .font(.system(size: 13))
+                .foregroundColor(valueColor)
+                .textSelection(.enabled)
+            
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - オプショナル値対応版
+
+extension InfoRow {
+    init(label: String, value: NSNumber?, unit: String = "", labelWidth: CGFloat = 140) {
+        self.label = label
+        if let value = value {
+            self.value = String(format: "%.1f", value.doubleValue) + (unit.isEmpty ? "" : " \(unit)")
+        } else {
+            self.value = "未入力"
+        }
+        self.valueColor = value == nil ? .secondary : .primary
+        self.labelWidth = labelWidth
+    }
+    
+    
+    init(label: String, value: Bool, trueText: String = "使用", falseText: String = "未使用", labelWidth: CGFloat = 140) {
+        self.label = label
+        self.value = value ? trueText : falseText
+        self.valueColor = value ? .green : .secondary
+        self.labelWidth = labelWidth
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    VStack(spacing: 8) {
+        InfoRow(label: "患者ID", value: "P-0001")
+        InfoRow(label: "年齢", value: "28歳")
+        InfoRow(label: "身長", value: NSNumber(value: 165.0), unit: "cm")
+        InfoRow(label: "体重", value: nil as NSNumber?, unit: "kg")
+        InfoRow(label: "VASER使用", value: true)
+        InfoRow(label: "Aquicell使用", value: false)
+    }
+    .padding()
+}

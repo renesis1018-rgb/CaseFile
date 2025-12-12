@@ -1,0 +1,242 @@
+//
+//  ContentView.swift
+//  CaseFile
+//
+//  メイン画面（患者一覧）
+//
+
+import SwiftUI
+import CoreData
+
+struct ContentView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    
+    @FetchRequest(
+        entity: Patient.entity(),
+        sortDescriptors: [NSSortDescriptor(keyPath: \Patient.registeredDate, ascending: false)]
+    ) private var allPatients: FetchedResults<Patient>
+    
+    // MARK: - State
+    
+    @State private var searchPatientId: String = ""
+    @State private var showAddPatient = false
+    @State private var showCSVImport = false
+    @State private var selectedPatient: Patient?
+    
+    // MARK: - Computed
+    
+    private var filteredPatients: [Patient] {
+        if searchPatientId.isEmpty {
+            return Array(allPatients)
+        } else {
+            return allPatients.filter { patient in
+                patient.patientId?.localizedCaseInsensitiveContains(searchPatientId) ?? false
+            }
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // ヘッダー: 検索 + ボタン群
+                headerView
+                
+                Divider()
+                
+                // 患者リスト
+                if filteredPatients.isEmpty {
+                    emptyStateView
+                } else {
+                    patientListView
+                }
+            }
+            .navigationTitle("CaseFile - 患者管理")
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button(action: { showCSVImport = true }) {
+                        Label("CSVインポート", systemImage: "square.and.arrow.down")
+                    }
+                }
+            }
+            .sheet(isPresented: $showAddPatient) {
+                AddPatientView(context: viewContext)
+            }
+            .sheet(isPresented: $showCSVImport) {
+                CSVImportView()
+            }
+            
+            // 右側の初期表示（患者未選択時）
+            VStack {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 80))
+                    .foregroundColor(.secondary)
+                Text("患者を選択してください")
+                    .font(.title2)
+                    .foregroundColor(.secondary)
+                    .padding(.top)
+            }
+        }
+    }
+    // MARK: - Delete Patient Function
+    
+    private func deletePatient(_ patient: Patient) {
+        viewContext.delete(patient)
+        
+        do {
+            try viewContext.save()
+            // 削除した患者が選択されていた場合は選択解除
+            if selectedPatient == patient {
+                selectedPatient = nil
+            }
+        } catch {
+            print("患者削除エラー: \(error.localizedDescription)")
+        }
+    }
+    
+    
+    // MARK: - Header View
+    
+    private var headerView: some View {
+        HStack(spacing: 16) {
+            // 検索フィールド
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("患者IDで検索", text: $searchPatientId)
+                    .textFieldStyle(.plain)
+                
+                if !searchPatientId.isEmpty {
+                    Button(action: { searchPatientId = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(8)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(8)
+            
+            // 新規患者登録ボタン
+            Button(action: { showAddPatient = true }) {
+                Label("新規患者登録", systemImage: "plus")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+        }
+        .padding()
+    }
+    
+    // MARK: - Patient List View
+    
+    private var patientListView: some View {
+        List(filteredPatients, id: \.objectID, selection: $selectedPatient) { patient in
+            NavigationLink(destination: PatientDetailView(patient: patient)) {
+                PatientRowView(patient: patient)
+            }
+            .contextMenu {
+                Button(role: .destructive, action: {
+                    deletePatient(patient)
+                }) {
+                    Label("削除", systemImage: "trash")
+                }
+            }
+        }
+        .listStyle(.sidebar)
+    }
+    
+    // MARK: - Empty State View
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 64))
+                .foregroundColor(.secondary)
+            
+            if searchPatientId.isEmpty {
+                Text("患者が登録されていません")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                
+                Text("「新規患者登録」ボタンから患者を追加してください")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                
+                Button(action: { showAddPatient = true }) {
+                    Label("新規患者登録", systemImage: "plus")
+                        .font(.system(size: 15, weight: .medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top)
+            } else {
+                Text("「\(searchPatientId)」に一致する患者が見つかりません")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                
+                Button(action: { searchPatientId = "" }) {
+                    Text("検索をクリア")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+}
+
+// MARK: - Patient Row View
+
+struct PatientRowView: View {
+    let patient: Patient
+    
+    private var surgeryCount: Int {
+        (patient.surgeries as? Set<Surgery>)?.count ?? 0
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(patient.patientId ?? "ID不明")
+                    .font(.system(size: 14, weight: .semibold))
+                
+                Spacer()
+                
+                Text("\(patient.age?.int16Value ?? 0)歳")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                
+                Text(patient.gender ?? "")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            
+            if let name = patient.name, !name.isEmpty {
+                Text(name)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            
+            HStack(spacing: 4) {
+                Image(systemName: "stethoscope")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                
+                Text("手術 \(surgeryCount)件")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    ContentView()
+        .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+}

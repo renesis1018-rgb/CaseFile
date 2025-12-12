@@ -1,0 +1,70 @@
+<?xml version='1.0' encoding='utf-8'?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="24411" systemVersion="25B78" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="AccessLog" representedClassName="AccessLog" syncable="YES" codeGenerationType="class">
+        <attribute name="action" attributeType="String" />
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO" />
+        <attribute name="timestamp" attributeType="Date" usesScalarValueType="NO" />
+        <attribute name="userId" optional="YES" attributeType="String" />
+    </entity>
+    <entity name="FollowUp" representedClassName="FollowUp" syncable="YES" codeGenerationType="class">
+        <attribute name="bodyWeight" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="breastQScore" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO" />
+        <attribute name="measurementDate" attributeType="Date" usesScalarValueType="NO" />
+        <attribute name="notes" optional="YES" attributeType="String" />
+        <attribute name="retentionRateL" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="retentionRateR" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="smokingStatus" optional="YES" attributeType="String" />
+        <attribute name="timing" attributeType="String" />
+        <attribute name="vectraL" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="vectraR" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <relationship name="surgery" maxCount="1" deletionRule="Nullify" destinationEntity="Surgery" inverseName="followUps" inverseEntity="Surgery" />
+    <attribute name="vectraPerformed" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" /></entity>
+    <entity name="Patient" representedClassName="Patient" syncable="YES" codeGenerationType="class">
+        <attribute name="age" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="bmi" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES" />
+        <attribute name="height" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES" />
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO" />
+        <attribute name="notes" optional="YES" attributeType="String" />
+        <attribute name="patientId" attributeType="String" />
+        <attribute name="registeredDate" attributeType="Date" usesScalarValueType="NO" />
+        <attribute name="weight" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES" />
+        <relationship name="surgeries" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Surgery" inverseName="patient" inverseEntity="Surgery" />
+    <attribute name="name" attributeType="String" /><attribute name="gender" attributeType="String" optional="YES" /><attribute name="contactInfo" attributeType="String" optional="YES" /></entity>
+    <entity name="Photo" representedClassName="Photo" syncable="YES" codeGenerationType="class">
+        <attribute name="angle" attributeType="String" />
+        <attribute name="daysAfterSurgery" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="exifDate" optional="YES" attributeType="Date" usesScalarValueType="NO" />
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO" />
+        <attribute name="imageData" attributeType="Binary" allowsExternalBinaryDataStorage="YES" />
+        <attribute name="notes" optional="YES" attributeType="String" />
+        <attribute name="thumbnail" optional="YES" attributeType="Binary" />
+        <attribute name="timing" attributeType="String" />
+        <attribute name="uploadDate" attributeType="Date" usesScalarValueType="NO" />
+        <relationship name="surgery" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Surgery" inverseName="photos" inverseEntity="Surgery" />
+    </entity>
+    <entity name="Surgery" representedClassName="Surgery" syncable="YES" codeGenerationType="class">
+        <attribute name="aquicellUsed" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" />
+        <attribute name="breastFeeding" optional="YES" attributeType="String" />
+        <attribute name="createdDate" attributeType="Date" usesScalarValueType="NO" />
+        <attribute name="donorSite" optional="YES" attributeType="String" />
+        <attribute name="donorSiteOther" optional="YES" attributeType="String" />
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO" />
+        <attribute name="injectionVolumeL" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="injectionVolumeR" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="nacImf" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="notes" optional="YES" attributeType="String" />
+        <attribute name="preOpVectraL" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="preOpVectraR" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="YES" />
+        <attribute name="procedure" attributeType="String" />
+        <attribute name="skinLaxity" optional="YES" attributeType="String" />
+        <attribute name="smoking" optional="YES" attributeType="String" />
+        <attribute name="surgeryCategory" attributeType="String" defaultValueString="" />
+        <attribute name="surgeryDate" attributeType="Date" usesScalarValueType="NO" />
+        <attribute name="surgeryType" optional="YES" attributeType="String" defaultValueString="脂肪豊胸" />
+        <attribute name="vaserUsed" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES" />
+        <relationship name="followUps" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="FollowUp" inverseName="surgery" inverseEntity="FollowUp" />
+        <relationship name="patient" maxCount="1" deletionRule="Nullify" destinationEntity="Patient" inverseName="surgeries" inverseEntity="Patient" />
+        <relationship name="photos" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Photo" />
+    <attribute name="preOpVectra" attributeType="Boolean" usesScalarValueType="YES" defaultValueString="NO" /><attribute name="rightBreastVolume" attributeType="String" optional="YES" /><attribute name="leftBreastVolume" attributeType="String" optional="YES" /></entity>
+</model>

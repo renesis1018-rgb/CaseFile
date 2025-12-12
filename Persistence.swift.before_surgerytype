@@ -1,0 +1,146 @@
+import CoreData
+
+class Persistence {
+    static let shared = Persistence()
+    
+    let container: NSPersistentContainer
+    
+    init() {
+        container = NSPersistentContainer(name: "CaseFile")
+        
+        container.loadPersistentStores { description, error in
+            if let error = error {
+                fatalError("Core Data読み込みエラー: \(error)")
+            }
+        }
+        
+        container.viewContext.automaticallyMergesChangesFromParent = true
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+    }
+    
+    // MARK: - 患者保存
+    func savePatient(context: NSManagedObjectContext, patientId: String, age: Int, height: Double, weight: Double, notes: String?) {
+        let patient = Patient(context: context)
+        patient.id = UUID()
+        patient.patientId = patientId
+        patient.age = Int16(age)
+        patient.height = height
+        patient.weight = weight
+        patient.bmi = weight / (height * height)
+        patient.registeredDate = Date()
+        patient.notes = notes
+        
+        do {
+            try context.save()
+            print("✅ 患者保存成功: \(patientId)")
+        } catch {
+            print("❌ 患者保存エラー: \(error)")
+        }
+    }
+    
+    // MARK: - 手術保存（VASER・Aquicell対応）
+    func saveSurgery(context: NSManagedObjectContext, patient: Patient, surgeryDate: Date, procedure: String,
+                     vaserUsed: Bool, aquicellUsed: Bool,
+                     breastFeeding: String?, smoking: String?,
+                     preOpVectraR: Double?, preOpVectraL: Double?, nacImf: Double?, skinLaxity: String?,
+                     donorSite: String?, donorSiteOther: String?,
+                     injectionVolumeR: Double, injectionVolumeL: Double, notes: String?) {
+        let surgery = Surgery(context: context)
+        surgery.id = UUID()
+        surgery.surgeryDate = surgeryDate
+        surgery.procedure = procedure
+        surgery.vaserUsed = vaserUsed
+        surgery.aquicellUsed = aquicellUsed
+        surgery.breastFeeding = breastFeeding
+        surgery.smoking = smoking
+        surgery.preOpVectraR = preOpVectraR ?? 0
+        surgery.preOpVectraL = preOpVectraL ?? 0
+        surgery.nacImf = nacImf ?? 0
+        surgery.skinLaxity = skinLaxity
+        surgery.donorSite = donorSite
+        surgery.donorSiteOther = donorSiteOther
+        surgery.injectionVolumeR = injectionVolumeR
+        surgery.injectionVolumeL = injectionVolumeL
+        surgery.createdDate = Date()
+        surgery.notes = notes
+        surgery.patient = patient
+        
+        do {
+            try context.save()
+            print("✅ 手術保存成功: \(procedure)")
+        } catch {
+            print("❌ 手術保存エラー: \(error)")
+        }
+    }
+    
+    // MARK: - フォローアップ保存（定着率自動計算）
+    func saveFollowUp(context: NSManagedObjectContext, surgery: Surgery, timing: String, measurementDate: Date,
+                      vectraR: Double?, vectraL: Double?, bodyWeight: Double, breastQScore: Int?, smokingStatus: String?, notes: String?) {
+        let followUp = FollowUp(context: context)
+        followUp.id = UUID()
+        followUp.timing = timing
+        followUp.measurementDate = measurementDate
+        followUp.vectraR = vectraR ?? 0
+        followUp.vectraL = vectraL ?? 0
+        followUp.bodyWeight = bodyWeight
+        followUp.breastQScore = Int16(breastQScore ?? 0)
+        followUp.smokingStatus = smokingStatus
+        followUp.notes = notes
+        followUp.surgery = surgery
+        
+        // 定着率計算
+        if let preR = surgery.preOpVectraR as Double?, preR > 0,
+           let injR = surgery.injectionVolumeR as Double?, injR > 0,
+           let postR = vectraR {
+            followUp.retentionRateR = ((postR - preR) / injR) * 100
+        }
+        
+        if let preL = surgery.preOpVectraL as Double?, preL > 0,
+           let injL = surgery.injectionVolumeL as Double?, injL > 0,
+           let postL = vectraL {
+            followUp.retentionRateL = ((postL - preL) / injL) * 100
+        }
+        
+        do {
+            try context.save()
+            print("✅ フォローアップ保存成功: \(timing)")
+        } catch {
+            print("❌ フォローアップ保存エラー: \(error)")
+        }
+    }
+    
+    // MARK: - 写真保存
+    func savePhoto(context: NSManagedObjectContext, surgery: Surgery, timing: String, angle: String, imageData: Data, exifDate: Date?, notes: String?) {
+        let photo = Photo(context: context)
+        photo.id = UUID()
+        photo.timing = timing
+        photo.angle = angle
+        photo.imageData = imageData
+        photo.exifDate = exifDate
+        photo.uploadDate = Date()
+        photo.notes = notes
+        photo.surgery = surgery
+        
+        if let exif = exifDate, let surgeryDate = surgery.surgeryDate {
+            let days = Calendar.current.dateComponents([.day], from: surgeryDate, to: exif).day ?? 0
+            photo.daysAfterSurgery = Int16(days)
+        }
+        
+        do {
+            try context.save()
+            print("✅ 写真保存成功")
+        } catch {
+            print("❌ 写真保存エラー: \(error)")
+        }
+    }
+    
+    // MARK: - データ削除
+    func deletePatient(context: NSManagedObjectContext, patient: Patient) {
+        context.delete(patient)
+        do {
+            try context.save()
+        } catch {
+            print("❌ 削除エラー: \(error)")
+        }
+    }
+}

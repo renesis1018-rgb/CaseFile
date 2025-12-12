@@ -1,0 +1,219 @@
+//
+//  PersistenceController.swift
+//  CaseFile
+//
+//  Photo対応版 CoreData Stack
+//
+
+import CoreData
+
+struct PersistenceController {
+    static let shared = PersistenceController()
+    
+    let container: NSPersistentContainer
+    
+    // Preview用（メモリ内のみ）
+    static var preview: PersistenceController = {
+        let controller = PersistenceController(inMemory: true)
+        let viewContext = controller.container.viewContext
+        
+        // プレビュー用サンプルデータ
+        let patient = Patient(context: viewContext)
+        patient.id = UUID()
+        patient.patientId = "P-0001"
+        patient.age = 28
+        patient.gender = "女性"
+        patient.name = "サンプル患者"
+        patient.registeredDate = Date()
+        
+        let surgery = Surgery(context: viewContext)
+        surgery.id = UUID()
+        surgery.surgeryDate = Date()
+        surgery.surgeryCategory = "豊胸系"
+        surgery.surgeryType = "脂肪注入"
+        surgery.patient = patient
+        
+        do {
+            try viewContext.save()
+        } catch {
+            fatalError("プレビューデータの作成に失敗: \(error.localizedDescription)")
+        }
+        
+        return controller
+    }()
+    
+    init(inMemory: Bool = false) {
+        container = NSPersistentContainer(name: "CaseFile")
+        
+        if inMemory {
+            container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
+        }
+        
+        container.loadPersistentStores { description, error in
+            if let error = error {
+                fatalError("CoreDataの読み込みに失敗: \(error.localizedDescription)")
+            }
+        }
+        
+        // マージポリシー設定（競合時は保存を優先）
+        container.viewContext.automaticallyMergesChangesFromParent = true
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+    }
+    
+    // MARK: - Save Context
+    
+    func save() {
+        let context = container.viewContext
+        
+        if context.hasChanges {
+            do {
+                try context.save()
+            } catch {
+                let nsError = error as NSError
+                print("⚠️ CoreData保存エラー: \(nsError), \(nsError.userInfo)")
+            }
+        }
+    }
+    
+    // MARK: - Patient操作
+    
+    /// 患者ID重複チェック
+    func isPatientIdDuplicate(_ patientId: String, excluding: Patient? = nil) -> Bool {
+        let request = Patient.fetchRequest()
+        request.predicate = NSPredicate(format: "patientId == %@", patientId)
+        
+        do {
+            let results = try container.viewContext.fetch(request)
+            if let excluding = excluding {
+                return results.contains(where: { $0.objectID != excluding.objectID })
+            }
+            return !results.isEmpty
+        } catch {
+            print("⚠️ 患者ID重複チェックエラー: \(error)")
+            return false
+        }
+    }
+    
+    /// 患者IDで検索
+    func fetchPatient(byPatientId patientId: String) -> Patient? {
+        let request = Patient.fetchRequest()
+        request.predicate = NSPredicate(format: "patientId == %@", patientId)
+        request.fetchLimit = 1
+        
+        do {
+            return try container.viewContext.fetch(request).first
+        } catch {
+            print("⚠️ 患者検索エラー: \(error)")
+            return nil
+        }
+    }
+    
+    // MARK: - Surgery操作
+    
+    /// 特定患者の手術一覧を取得
+    func fetchSurgeries(for patient: Patient) -> [Surgery] {
+        let request = Surgery.fetchRequest()
+        request.predicate = NSPredicate(format: "patient == %@", patient)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Surgery.surgeryDate, ascending: false)]
+        
+        do {
+            return try container.viewContext.fetch(request)
+        } catch {
+            print("⚠️ 手術取得エラー: \(error)")
+            return []
+        }
+    }
+    
+    /// カテゴリ別手術取得
+    func fetchSurgeries(category: String) -> [Surgery] {
+        let request = Surgery.fetchRequest()
+        request.predicate = NSPredicate(format: "surgeryCategory == %@", category)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Surgery.surgeryDate, ascending: false)]
+        
+        do {
+            return try container.viewContext.fetch(request)
+        } catch {
+            print("⚠️ カテゴリ別手術取得エラー: \(error)")
+            return []
+        }
+    }
+    
+    // MARK: - Photo操作
+    
+    /// 手術の写真一覧を取得
+    func fetchPhotos(for surgery: Surgery, angle: String? = nil, timing: String? = nil) -> [Photo] {
+        let request = Photo.fetchRequest()
+        var predicates: [NSPredicate] = [NSPredicate(format: "surgery == %@", surgery)]
+        
+        if let angle = angle {
+            predicates.append(NSPredicate(format: "angle == %@", angle))
+        }
+        if let timing = timing {
+            predicates.append(NSPredicate(format: "timing == %@", timing))
+        }
+        
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        request.sortDescriptors = [
+            NSSortDescriptor(keyPath: \Photo.exifDate, ascending: true),
+            NSSortDescriptor(keyPath: \Photo.uploadDate, ascending: true)
+        ]
+        
+        do {
+            return try container.viewContext.fetch(request)
+        } catch {
+            print("⚠️ 写真取得エラー: \(error)")
+            return []
+        }
+    }
+    
+    // MARK: - LabData操作
+    
+    /// 患者の血液検査データ取得
+    func fetchLabData(for patient: Patient) -> [LabData] {
+        let request = LabData.fetchRequest()
+        request.predicate = NSPredicate(format: "patient == %@", patient)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \LabData.testDate, ascending: false)]
+        
+        do {
+            return try container.viewContext.fetch(request)
+        } catch {
+            print("⚠️ 血液検査データ取得エラー: \(error)")
+            return []
+        }
+    }
+    
+    // MARK: - FollowUp操作
+    
+    /// 手術の経過情報取得
+    func fetchFollowUps(for surgery: Surgery) -> [FollowUp] {
+        let request = FollowUp.fetchRequest()
+        request.predicate = NSPredicate(format: "surgery == %@", surgery)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \FollowUp.followUpDate, ascending: true)]
+        
+        do {
+            return try container.viewContext.fetch(request)
+        } catch {
+            print("⚠️ 経過情報取得エラー: \(error)")
+            return []
+        }
+    }
+    
+    // MARK: - Delete操作
+    
+    func delete(_ object: NSManagedObject) {
+        container.viewContext.delete(object)
+        save()
+    }
+    
+    func deleteAll<T: NSManagedObject>(_ type: T.Type) {
+        let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: String(describing: type))
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        
+        do {
+            try container.viewContext.execute(deleteRequest)
+            save()
+        } catch {
+            print("⚠️ 一括削除エラー: \(error)")
+        }
+    }
+}

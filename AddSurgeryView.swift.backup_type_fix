@@ -1,0 +1,675 @@
+//
+//  AddSurgeryView.swift
+//  CaseFile
+//
+//  新規手術登録画面（動的フォーム対応）
+//
+
+import SwiftUI
+import CoreData
+
+struct AddSurgeryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var patient: Patient
+    let context: NSManagedObjectContext
+    
+    // MARK: - 基本情報
+    @State private var surgeryDate = Date()
+    @State private var surgeryCategory = "豊胸系"
+    @State private var surgeryType = "脂肪注入"
+    @State private var notes = ""
+    
+    // MARK: - 術前患者状態
+    @State private var heightCm = ""
+    @State private var bodyWeight = ""
+    @State private var smokingHistory = ""
+    @State private var breastfeedingHistory = ""
+    @State private var numberOfProcedures = ""
+    
+    // MARK: - 術前測定値（豊胸共通）
+    @State private var preOpVectraR = ""
+    @State private var preOpVectraL = ""
+    @State private var nacImfRight = ""
+    @State private var nacImfLeft = ""
+    @State private var nacImfStretchRight = ""
+    @State private var nacImfStretchLeft = ""
+    @State private var skinThicknessRight = ""
+    @State private var skinThicknessLeft = ""
+    
+    // MARK: - 脂肪注入豊胸専用
+    @State private var donorSite = ""
+    @State private var injectionVolumeR = ""
+    @State private var injectionVolumeL = ""
+    @State private var subcutaneousRight = ""
+    @State private var subcutaneousLeft = ""
+    @State private var subglandularRight = ""
+    @State private var subglandularLeft = ""
+    @State private var submuscularRight = ""
+    @State private var submuscularLeft = ""
+    @State private var decolleteRight = ""
+    @State private var decolleteLeft = ""
+    @State private var vaserUsed = false
+    @State private var aquicellUsed = false
+    
+    // MARK: - シリコン豊胸専用
+    @State private var implantSizeR = ""
+    @State private var implantSizeL = ""
+    @State private var implantManufacturer: String? = nil
+    @State private var implantShape: String? = nil
+    @State private var insertionPosition: String? = nil
+    @State private var incisionPosition: String? = nil
+    
+    // MARK: - 脂肪吸引専用
+    @State private var liposuctionAreasDict: [String: Bool] = [:]
+    @State private var liposuctionVolumeR = ""
+    @State private var liposuctionVolumeL = ""
+    @State private var liposuctionDevice: String? = nil
+    @State private var anesthesiaMethod = ""
+    
+    // MARK: - UI State
+    @State private var showError = false
+    @State private var errorMessage = ""
+    
+    // MARK: - 選択肢定義
+    let categoryOptions = ["豊胸系", "目元", "脂肪吸引", "その他"]
+    
+    var surgeryTypeOptions: [String] {
+        switch surgeryCategory {
+        case "豊胸系": return ["脂肪注入", "シリコン"]
+        case "目元": return ["埋没二重", "全切開二重", "眉下切開", "裏ハムラ", "切開ハムラ"]
+        case "脂肪吸引": return ["脂肪吸引"]
+        case "その他": return ["鼻", "輪郭"]
+        default: return []
+        }
+    }
+    
+    var fatInjectionTypeOptions: [String] {
+        ["PureGraft", "コンデンスリッチ", "ADRC"]
+    }
+    
+    // 脂肪吸引部位定義
+    let liposuctionAreas: [(category: String, items: [String])] = [
+        ("上肢", ["二の腕", "肩", "肩甲骨横"]),
+        ("体幹", ["腹", "ウエスト", "腰", "背中上", "背中下"]),
+        ("下肢", ["大腿", "臀部", "膝", "下腿", "足首"])
+    ]
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                // 基本情報セクション
+                basicInfoSection
+                
+                // カテゴリ別の動的フォーム
+                if surgeryCategory == "豊胸系" {
+                    if surgeryType == "脂肪注入" {
+                        fatInjectionSections
+                    } else if surgeryType == "シリコン" {
+                        siliconeSections
+                    }
+                } else if surgeryCategory == "脂肪吸引" {
+                    liposuctionSections
+                } else {
+                    // 目元・その他は備考のみ
+                    notesOnlySection
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("新規手術登録")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("登録") { saveSurgery() }
+                        .keyboardShortcut(.return, modifiers: .command)
+                }
+            }
+            .alert("入力エラー", isPresented: $showError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage)
+            }
+            .onAppear {
+                initializeLiposuctionAreas()
+                updateSurgeryType()
+            }
+            .onChange(of: surgeryCategory) { _ in
+                updateSurgeryType()
+            }
+        }
+    }
+    
+    // MARK: - 基本情報セクション
+    
+    private var basicInfoSection: some View {
+        Section(header: Text("基本情報")) {
+            DatePicker("手術日", selection: $surgeryDate, displayedComponents: .date)
+            
+            Picker("手術カテゴリ", selection: $surgeryCategory) {
+                ForEach(categoryOptions, id: \.self) { category in
+                    Text(category).tag(category)
+                }
+            }
+            
+            if surgeryCategory == "豊胸系" && surgeryType == "脂肪注入" {
+                Picker("術式", selection: $surgeryType) {
+                    ForEach(fatInjectionTypeOptions, id: \.self) { type in
+                        Text(type).tag(type)
+                    }
+                }
+            } else {
+                Picker("術式", selection: $surgeryType) {
+                    ForEach(surgeryTypeOptions, id: \.self) { type in
+                        Text(type).tag(type)
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - 脂肪注入豊胸用セクション群
+    
+    private var fatInjectionSections: some View {
+        Group {
+            preOpPatientStatusSection
+            preOpMeasurementsSection
+            fatInjectionDetailsSection
+        }
+    }
+    
+    private var preOpPatientStatusSection: some View {
+        Section(header: Text("術前患者状態")) {
+            HStack {
+                Text("身長")
+                TextField("cm", text: $heightCm)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                Text("cm")
+            }
+            
+            HStack {
+                Text("体重")
+                TextField("kg", text: $bodyWeight)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                Text("kg")
+            }
+            
+            if let height = Double(heightCm), let weight = Double(bodyWeight), height > 0 {
+                let bmi = weight / pow(height / 100.0, 2)
+                HStack {
+                    Text("BMI")
+                    Text(String(format: "%.1f", bmi))
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            HStack {
+                Text("喫煙歴")
+                TextField("例: なし", text: $smokingHistory)
+                    .textFieldStyle(.roundedBorder)
+            }
+            
+            HStack {
+                Text("授乳歴")
+                TextField("例: なし", text: $breastfeedingHistory)
+                    .textFieldStyle(.roundedBorder)
+            }
+            
+            HStack {
+                Text("術式回数")
+                TextField("回", text: $numberOfProcedures)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 60)
+                Text("回")
+            }
+        }
+    }
+    
+    private var preOpMeasurementsSection: some View {
+        Section(header: Text("術前測定値")) {
+            Group {
+                HStack {
+                    Text("Vectra術前(R)")
+                    TextField("cc", text: $preOpVectraR)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+                HStack {
+                    Text("Vectra術前(L)")
+                    TextField("cc", text: $preOpVectraL)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+            }
+            
+            Group {
+                HStack {
+                    Text("NAC-IMF(R)")
+                    TextField("cm", text: $nacImfRight)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cm")
+                }
+                HStack {
+                    Text("NAC-IMF(L)")
+                    TextField("cm", text: $nacImfLeft)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cm")
+                }
+            }
+            
+            Group {
+                HStack {
+                    Text("NAC-IMF stretch(R)")
+                    TextField("cm", text: $nacImfStretchRight)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cm")
+                }
+                HStack {
+                    Text("NAC-IMF stretch(L)")
+                    TextField("cm", text: $nacImfStretchLeft)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cm")
+                }
+            }
+            
+            Group {
+                HStack {
+                    Text("Skin thickness(R)")
+                    TextField("mm", text: $skinThicknessRight)
+                        .textFieldStyle(.roundedBorder)
+                    Text("mm")
+                }
+                HStack {
+                    Text("Skin thickness(L)")
+                    TextField("mm", text: $skinThicknessLeft)
+                        .textFieldStyle(.roundedBorder)
+                    Text("mm")
+                }
+            }
+        }
+    }
+    
+    private var fatInjectionDetailsSection: some View {
+        Section(header: Text("手術内容")) {
+            HStack {
+                Text("採取部位")
+                TextField("例: 大腿", text: $donorSite)
+                    .textFieldStyle(.roundedBorder)
+            }
+            
+            Group {
+                HStack {
+                    Text("注入量(R)")
+                    TextField("cc", text: $injectionVolumeR)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+                HStack {
+                    Text("注入量(L)")
+                    TextField("cc", text: $injectionVolumeL)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+            }
+            
+            Group {
+                HStack {
+                    Text("皮下(R)")
+                    TextField("cc", text: $subcutaneousRight)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+                HStack {
+                    Text("皮下(L)")
+                    TextField("cc", text: $subcutaneousLeft)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+            }
+            
+            Group {
+                HStack {
+                    Text("乳腺下(R)")
+                    TextField("cc", text: $subglandularRight)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+                HStack {
+                    Text("乳腺下(L)")
+                    TextField("cc", text: $subglandularLeft)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+            }
+            
+            Group {
+                HStack {
+                    Text("大胸筋内下(R)")
+                    TextField("cc", text: $submuscularRight)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+                HStack {
+                    Text("大胸筋内下(L)")
+                    TextField("cc", text: $submuscularLeft)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+            }
+            
+            Group {
+                HStack {
+                    Text("デコルテ(R)")
+                    TextField("cc", text: $decolleteRight)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+                HStack {
+                    Text("デコルテ(L)")
+                    TextField("cc", text: $decolleteLeft)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+            }
+            
+            Toggle("VASER使用", isOn: $vaserUsed)
+            Toggle("Aquicell使用", isOn: $aquicellUsed)
+        }
+    }
+    
+    // MARK: - シリコン豊胸用セクション群
+    
+    private var siliconeSections: some View {
+        Group {
+            preOpPatientStatusSection
+            preOpMeasurementsSection
+            siliconeDetailsSection
+        }
+    }
+    
+    private var siliconeDetailsSection: some View {
+        Section(header: Text("インプラント情報")) {
+            Group {
+                HStack {
+                    Text("サイズ(R)")
+                    TextField("cc", text: $implantSizeR)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+                HStack {
+                    Text("サイズ(L)")
+                    TextField("cc", text: $implantSizeL)
+                        .textFieldStyle(.roundedBorder)
+                    Text("cc")
+                }
+            }
+            
+            Picker("メーカー", selection: $implantManufacturer) {
+                Text("選択してください").tag(nil as String?)
+                Text("Motiva").tag("Motiva" as String?)
+                Text("Mesmo").tag("Mesmo" as String?)
+                Text("Cereform").tag("Cereform" as String?)
+            }
+            
+            Picker("形状", selection: $implantShape) {
+                Text("選択してください").tag(nil as String?)
+                Text("Round").tag("Round" as String?)
+                Text("Anatomical").tag("Anatomical" as String?)
+            }
+            
+            Picker("挿入位置", selection: $insertionPosition) {
+                Text("選択してください").tag(nil as String?)
+                Text("Subglandular").tag("Subglandular" as String?)
+                Text("Subpectoral").tag("Subpectoral" as String?)
+                Text("Dual Plane").tag("Dual Plane" as String?)
+            }
+            
+            Picker("切開位置", selection: $incisionPosition) {
+                Text("選択してください").tag(nil as String?)
+                Text("Axillary").tag("Axillary" as String?)
+                Text("Periareolar").tag("Periareolar" as String?)
+                Text("Inframammary Fold").tag("Inframammary Fold" as String?)
+            }
+        }
+    }
+    
+    // MARK: - 脂肪吸引用セクション群
+    
+    private var liposuctionSections: some View {
+        Group {
+            liposuctionPatientStatusSection
+            liposuctionAreasSection
+            liposuctionVolumeSection
+            liposuctionDeviceSection
+        }
+    }
+    
+    private var liposuctionPatientStatusSection: some View {
+        Section(header: Text("術前患者状態")) {
+            HStack {
+                Text("身長")
+                TextField("cm", text: $heightCm)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                Text("cm")
+            }
+            
+            HStack {
+                Text("体重")
+                TextField("kg", text: $bodyWeight)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                Text("kg")
+            }
+            
+            if let height = Double(heightCm), let weight = Double(bodyWeight), height > 0 {
+                let bmi = weight / pow(height / 100.0, 2)
+                HStack {
+                    Text("BMI")
+                    Text(String(format: "%.1f", bmi))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+    
+    private var liposuctionAreasSection: some View {
+        Section(header: Text("吸引部位（複数選択可）")) {
+            ForEach(liposuctionAreas, id: \.category) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(group.category)
+                        .font(.headline)
+                        .padding(.top, 8)
+                    
+                    ForEach(group.items, id: \.self) { area in
+                        let key = "\(group.category)_\(area)"
+                        Toggle(area, isOn: Binding(
+                            get: { liposuctionAreasDict[key] ?? false },
+                            set: { liposuctionAreasDict[key] = $0 }
+                        ))
+                    }
+                }
+            }
+        }
+    }
+    
+    private var liposuctionVolumeSection: some View {
+        Section(header: Text("吸引量")) {
+            HStack {
+                Text("右")
+                TextField("cc", text: $liposuctionVolumeR)
+                    .textFieldStyle(.roundedBorder)
+                Text("cc")
+            }
+            
+            HStack {
+                Text("左")
+                TextField("cc", text: $liposuctionVolumeL)
+                    .textFieldStyle(.roundedBorder)
+                Text("cc")
+            }
+            
+            if let volR = Double(liposuctionVolumeR), let volL = Double(liposuctionVolumeL) {
+                HStack {
+                    Text("合計")
+                    Text(String(format: "%.0f cc", volR + volL))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+    
+    private var liposuctionDeviceSection: some View {
+        Section(header: Text("機器・麻酔")) {
+            Picker("使用機器", selection: $liposuctionDevice) {
+                Text("選択してください").tag(nil as String?)
+                Text("VASER").tag("VASER" as String?)
+                Text("Aquicell").tag("Aquicell" as String?)
+            }
+            
+            HStack {
+                Text("麻酔方法")
+                TextField("例: 静脈麻酔", text: $anesthesiaMethod)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+    
+    // MARK: - 備考のみセクション（目元・その他）
+    
+    private var notesOnlySection: some View {
+        Section(header: Text("備考")) {
+            TextEditor(text: $notes)
+                .frame(minHeight: 100)
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func initializeLiposuctionAreas() {
+        for group in liposuctionAreas {
+            for area in group.items {
+                let key = "\(group.category)_\(area)"
+                if liposuctionAreasDict[key] == nil {
+                    liposuctionAreasDict[key] = false
+                }
+            }
+        }
+    }
+    
+    private func updateSurgeryType() {
+        if !surgeryTypeOptions.contains(surgeryType) {
+            surgeryType = surgeryTypeOptions.first ?? ""
+        }
+    }
+    
+    private func saveSurgery() {
+        let surgery = Surgery(context: context)
+        surgery.id = UUID()
+        surgery.surgeryDate = surgeryDate
+        surgery.surgeryCategory = surgeryCategory
+        surgery.surgeryType = surgeryType
+        surgery.notes = notes.isEmpty ? nil : notes
+        surgery.patient = patient
+        
+        // 術前患者状態（豊胸・脂肪吸引）
+        if surgeryCategory == "豊胸系" || surgeryCategory == "脂肪吸引" {
+            if let height = Double(heightCm), height > 0 {
+                surgery.height = height / 100.0  // cm → m
+            }
+            if let weight = Double(bodyWeight), weight > 0 {
+                surgery.bodyWeight = weight
+            }
+            if let height = surgery.height, let weight = surgery.bodyWeight {
+                surgery.bmi = weight / (height * height)
+            }
+            surgery.smokingHistory = smokingHistory.isEmpty ? nil : smokingHistory
+            surgery.breastfeedingHistory = breastfeedingHistory.isEmpty ? nil : breastfeedingHistory
+            if let procedures = Int16(numberOfProcedures) {
+                surgery.numberOfProcedures = procedures
+            }
+        }
+        
+        // 脂肪注入豊胸
+        if surgeryCategory == "豊胸系" && surgeryType == "脂肪注入" {
+            surgery.donorSite = donorSite.isEmpty ? nil : donorSite
+            surgery.injectionVolumeR = Double(injectionVolumeR)
+            surgery.injectionVolumeL = Double(injectionVolumeL)
+            surgery.subcutaneousRight = Double(subcutaneousRight)
+            surgery.subcutaneousLeft = Double(subcutaneousLeft)
+            surgery.subglandularRight = Double(subglandularRight)
+            surgery.subglandularLeft = Double(subglandularLeft)
+            surgery.submuscularRight = Double(submuscularRight)
+            surgery.submuscularLeft = Double(submuscularLeft)
+            surgery.decolleteRight = Double(decolleteRight)
+            surgery.decolleteLeft = Double(decolleteLeft)
+            surgery.vaserUsed = vaserUsed
+            surgery.aquicellUsed = aquicellUsed
+            
+            // 術前測定値
+            surgery.preOpVectraR = Double(preOpVectraR)
+            surgery.preOpVectraL = Double(preOpVectraL)
+            surgery.nacImfRight = Double(nacImfRight)
+            surgery.nacImfLeft = Double(nacImfLeft)
+            surgery.nacImfStretchRight = Double(nacImfStretchRight)
+            surgery.nacImfStretchLeft = Double(nacImfStretchLeft)
+            surgery.skinThicknessRight = Double(skinThicknessRight)
+            surgery.skinThicknessLeft = Double(skinThicknessLeft)
+        }
+        
+        // シリコン豊胸
+        if surgeryCategory == "豊胸系" && surgeryType == "シリコン" {
+            surgery.implantSizeR = Double(implantSizeR)
+            surgery.implantSizeL = Double(implantSizeL)
+            surgery.implantManufacturer = implantManufacturer
+            surgery.implantShape = implantShape
+            surgery.insertionPosition = insertionPosition
+            surgery.incisionPosition = incisionPosition
+            
+            // 術前測定値
+            surgery.preOpVectraR = Double(preOpVectraR)
+            surgery.preOpVectraL = Double(preOpVectraL)
+            surgery.nacImfRight = Double(nacImfRight)
+            surgery.nacImfLeft = Double(nacImfLeft)
+            surgery.nacImfStretchRight = Double(nacImfStretchRight)
+            surgery.nacImfStretchLeft = Double(nacImfStretchLeft)
+            surgery.skinThicknessRight = Double(skinThicknessRight)
+            surgery.skinThicknessLeft = Double(skinThicknessLeft)
+        }
+        
+        // 脂肪吸引
+        if surgeryCategory == "脂肪吸引" {
+            let selectedAreas = liposuctionAreasDict.filter { $0.value }.map { $0.key }
+            if !selectedAreas.isEmpty {
+                if let jsonData = try? JSONEncoder().encode(selectedAreas),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    surgery.liposuctionAreas = jsonString
+                }
+            }
+            surgery.liposuctionVolumeR = Double(liposuctionVolumeR)
+            surgery.liposuctionVolumeL = Double(liposuctionVolumeL)
+            surgery.liposuctionDevice = liposuctionDevice
+            surgery.anesthesiaMethod = anesthesiaMethod.isEmpty ? nil : anesthesiaMethod
+        }
+        
+        // 保存
+        do {
+            try context.save()
+            dismiss()
+        } catch {
+            errorMessage = "保存に失敗しました: \(error.localizedDescription)"
+            showError = true
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    AddSurgeryView(
+        patient: PersistenceController.preview.container.viewContext.registeredObjects.first(where: { $0 is Patient }) as! Patient,
+        context: PersistenceController.preview.container.viewContext
+    )
+}

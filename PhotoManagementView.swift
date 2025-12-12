@@ -1,0 +1,314 @@
+import SwiftUI
+import CoreData
+
+struct PhotoManagementView: View {
+    let surgery: Surgery
+    @Environment(\.managedObjectContext) private var viewContext
+    
+    @FetchRequest private var photos: FetchedResults<Photo>
+    
+    @State private var showUploadView = false
+    @State private var showPhotoViewer = false
+    @State private var selectedPhotoIndex = 0
+    @State private var showDeleteAlert = false
+    @State private var photoToDelete: Photo? = nil
+    @State private var displayMode: DisplayMode = .byTiming
+    @State private var showComparisonView = false
+    
+    enum DisplayMode {
+        case byTiming  // 時期別表示
+        case byAngle   // 角度別表示
+    }
+    
+    init(surgery: Surgery) {
+        self.surgery = surgery
+        
+        // この手術に紐づく写真のみを取得
+        _photos = FetchRequest<Photo>(
+            sortDescriptors: [
+                NSSortDescriptor(keyPath: \Photo.exifDate, ascending: true)
+            ],
+            predicate: NSPredicate(format: "surgery == %@", surgery)
+        )
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // ヘッダー
+            HStack {
+                Text("📸 写真管理")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                // Before/After 比較ボタン
+                Button {
+                    showComparisonView = true
+                } label: {
+                    Label("Before/After", systemImage: "arrow.left.and.right")
+                }
+                .buttonStyle(.bordered)
+                .disabled(photos.isEmpty)
+                
+                // 表示モード切り替え
+                Picker("表示モード", selection: $displayMode) {
+                    Text("時期別").tag(DisplayMode.byTiming)
+                    Text("角度別").tag(DisplayMode.byAngle)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                
+                Button {
+                    showUploadView = true
+                } label: {
+                    Label("写真を追加", systemImage: "plus.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            
+            Divider()
+            
+            if photos.isEmpty {
+                // 写真がない場合
+                VStack(spacing: 20) {
+                    Image(systemName: "photo.stack")
+                        .font(.system(size: 60))
+                        .foregroundColor(.gray)
+                    
+                    Text("写真がまだありません")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    Button("写真を追加") {
+                        showUploadView = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // 写真一覧
+                ScrollView {
+                    if displayMode == .byTiming {
+                        photosByTimingView
+                    } else {
+                        photosByAngleView
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showUploadView) {
+            PhotoUploadView(surgery: surgery)
+        }
+        .sheet(isPresented: $showPhotoViewer) {
+            PhotoViewerView(photos: Array(photos), initialIndex: selectedPhotoIndex)
+        }
+        .sheet(isPresented: $showComparisonView) {
+            BeforeAfterComparisonView(photos: Array(photos))
+        }
+        .alert("写真を削除", isPresented: $showDeleteAlert) {
+            Button("キャンセル", role: .cancel) {}
+            Button("削除", role: .destructive) {
+                if let photo = photoToDelete {
+                    deletePhoto(photo)
+                }
+            }
+        } message: {
+            Text("この写真を削除してもよろしいですか?")
+        }
+    }
+    
+    // MARK: - 時期別表示
+    
+    private var photosByTimingView: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(groupedByTiming.sorted(by: { timingOrder($0.key) < timingOrder($1.key) }), id: \.key) { timing, photos in
+                VStack(alignment: .leading, spacing: 10) {
+                    // 時期ヘッダー
+                    HStack {
+                        Text("📅 \(timing)")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("(\(photos.count)枚)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                    
+                    // 角度別にグループ化して表示
+                    ForEach(groupPhotosByAngle(photos).sorted(by: { angleOrder($0.key) < angleOrder($1.key) }), id: \.key) { angle, anglePhotos in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("   \(angle)")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                                .padding(.leading)
+                            
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(anglePhotos) { photo in
+                                        PhotoThumbnail(photo: photo)
+                                            .onTapGesture {
+                                                openPhotoViewer(photo: photo)
+                                            }
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 5)
+            }
+        }
+        .padding(.vertical)
+    }
+    
+    // MARK: - 角度別表示
+    
+    private var photosByAngleView: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(groupedByAngle.sorted(by: { angleOrder($0.key) < angleOrder($1.key) }), id: \.key) { angle, photos in
+                VStack(alignment: .leading, spacing: 10) {
+                    // 角度ヘッダー
+                    HStack {
+                        Text("📐 \(angle)")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("(\(photos.count)枚)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                    
+                    // 時期順に表示
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(photos.sorted(by: { timingOrder($0.timing ?? "") < timingOrder($1.timing ?? "") })) { photo in
+                                VStack {
+                                    PhotoThumbnail(photo: photo)
+                                    Text(photo.timing ?? "")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .onTapGesture {
+                                    openPhotoViewer(photo: photo)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                .padding(.vertical, 5)
+            }
+        }
+        .padding(.vertical)
+    }
+    
+    // MARK: - Helper Functions
+    
+    private var groupedByTiming: [String: [Photo]] {
+        Dictionary(grouping: photos) { photo in
+            photo.timing ?? "その他"
+        }
+    }
+    
+    private var groupedByAngle: [String: [Photo]] {
+        Dictionary(grouping: photos) { photo in
+            photo.angle ?? "その他"
+        }
+    }
+    
+    private func groupPhotosByAngle(_ photos: [Photo]) -> [String: [Photo]] {
+        Dictionary(grouping: photos) { photo in
+            photo.angle ?? "その他"
+        }
+    }
+    
+    private func timingOrder(_ timing: String) -> Int {
+        switch timing {
+        case "術前": return 0
+        case "1W": return 1
+        case "1M": return 2
+        case "3M": return 3
+        case "6M": return 4
+        case "12M": return 5
+        default:
+            // Day XX 形式の場合は日数を抽出
+            if timing.starts(with: "Day ") {
+                let dayString = timing.replacingOccurrences(of: "Day ", with: "")
+                if let days = Int(dayString) {
+                    return 100 + days  // 100以降で日数順
+                }
+            }
+            return 999
+        }
+    }
+    
+    private func angleOrder(_ angle: String) -> Int {
+        // 術式に応じた角度順序
+        if let surgeryTypeString = surgery.surgeryType,
+           let surgeryType = SurgeryType(rawValue: surgeryTypeString) {
+            let angles = surgeryType.photoAngles
+            if let index = angles.firstIndex(of: angle) {
+                return index
+            }
+        }
+        
+        // デフォルトの順序（5方向 + 8方向対応）
+        switch angle {
+        case "正面": return 0
+        case "右側面": return 1
+        case "右斜め": return 2
+        case "左斜め": return 3
+        case "左側面": return 4
+        case "左斜め後ろ": return 5
+        case "背面": return 6
+        case "右斜め後ろ": return 7
+        default: return 99
+        }
+    }
+    
+    private func openPhotoViewer(photo: Photo) {
+        if let index = photos.firstIndex(of: photo) {
+            selectedPhotoIndex = index
+            showPhotoViewer = true
+        }
+    }
+    
+    private func deletePhoto(_ photo: Photo) {
+        PhotoManager.shared.deletePhoto(context: viewContext, photo: photo)
+    }
+}
+
+// MARK: - PhotoThumbnail
+
+struct PhotoThumbnail: View {
+    let photo: Photo
+    
+    var body: some View {
+        VStack {
+            if let thumbnailData = photo.thumbnail,
+               let nsImage = NSImage(data: thumbnailData),
+               let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                Image(decorative: cgImage, scale: 1.0)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 120, height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 120, height: 120)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .foregroundColor(.gray)
+                    )
+            }
+        }
+    }
+}
