@@ -772,10 +772,10 @@ struct AddSurgeryView: View {
             }
             
             if !decolleteR.isEmpty, let dec = Double(decolleteR) {
-                newSurgery.decolleteRight = NSNumber(value: dec)
+                newSurgery.decolletRight = NSNumber(value: dec)
             }
             if !decolleteL.isEmpty, let dec = Double(decolleteL) {
-                newSurgery.decolleteLeft = NSNumber(value: dec)
+                newSurgery.decolletLeft = NSNumber(value: dec)
             }
             
             newSurgery.vaserUsed = NSNumber(value: vectraUsed)

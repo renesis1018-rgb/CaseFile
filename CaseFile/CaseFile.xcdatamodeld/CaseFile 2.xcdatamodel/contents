@@ -124,8 +124,8 @@
         <attribute name="breastFeeding" optional="YES" attributeType="String"/>
         <attribute name="breastfeedingHistory" optional="YES" attributeType="String"/>
         <attribute name="createdDate" attributeType="Date" usesScalarValueType="NO"/>
-        <attribute name="decolleteLeft" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
-        <attribute name="decolleteRight" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="decolletLeft" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
+        <attribute name="decolletRight" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="donorSite" optional="YES" attributeType="String"/>
         <attribute name="donorSiteOther" optional="YES" attributeType="String"/>
         <attribute name="height" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="NO"/>
