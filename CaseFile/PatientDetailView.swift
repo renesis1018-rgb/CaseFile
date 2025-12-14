@@ -16,6 +16,8 @@ struct PatientDetailView: View {
     @State private var showAddSurgery = false
     @State private var showAddLabData = false
     @State private var showDeleteConfirm = false
+    @State private var selectedSurgery: Surgery?
+    @State private var showSurgeryDetail = false
     
     // MARK: - Computed
     
@@ -67,13 +69,20 @@ struct PatientDetailView: View {
         }
         .sheet(isPresented: $showEditPatient) {
             EditPatientView(patient: patient)
-                .frame(minWidth: 500, minHeight: 500)  // ← 🆕 追加
+                .frame(minWidth: 500, minHeight: 500)
         }
         .sheet(isPresented: $showAddSurgery) {
             AddSurgeryView(patient: patient, context: viewContext)
         }
         .sheet(isPresented: $showAddLabData) {
             AddLabDataView(patient: patient, context: viewContext)
+        }
+        .sheet(isPresented: $showSurgeryDetail) {
+            if let surgery = selectedSurgery {
+                SurgeryDetailView(surgery: surgery)
+                    .environment(\.managedObjectContext, viewContext)
+                    .frame(minWidth: 1000, idealWidth: 1200, minHeight: 750, idealHeight: 850)
+            }
         }
         .alert("患者削除の確認", isPresented: $showDeleteConfirm) {
             Button("キャンセル", role: .cancel) {}
@@ -180,7 +189,10 @@ struct PatientDetailView: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(surgeries, id: \.objectID) { surgery in
-                        NavigationLink(destination: SurgeryDetailView(surgery: surgery)) {
+                        Button(action: {
+                            selectedSurgery = surgery
+                            showSurgeryDetail = true
+                        }) {
                             SurgeryRowView(surgery: surgery)
                         }
                         .buttonStyle(.plain)

@@ -17,54 +17,68 @@ struct SurgeryDetailView: View {
     @State private var showEditSurgery = false
     @State private var showDeleteConfirm = false
     @State private var showAddFollowUp = false
+    @State private var selectedFollowUp: FollowUp?
+    @State private var showFollowUpDetail = false
     
     var body: some View {
-        VStack(spacing: 0) {
-            // カスタムヘッダー（ツールバーの代わり）
-            customHeader
-            
-            Divider()
-            
-            // タブビュー
-            TabView(selection: $selectedTab) {
-                // タブ1: 手術情報
-                surgeryInfoTab
-                    .tabItem {
-                        Label("手術情報", systemImage: "heart.text.square")
-                    }
-                    .tag(0)
+        NavigationView {
+            VStack(spacing: 0) {
+                // カスタムヘッダー（ツールバーの代わり）
+                customHeader
                 
-                // タブ2: 写真管理
-                PhotoManagementView(surgery: surgery)
-                    .tabItem {
-                        Label("写真管理", systemImage: "photo.on.rectangle")
-                    }
-                    .tag(1)
+                Divider()
                 
-                // タブ3: 経過情報
-                followUpListTab
-                    .tabItem {
-                        Label("経過情報", systemImage: "chart.line.uptrend.xyaxis")
-                    }
-                    .tag(2)
+                // タブビュー
+                TabView(selection: $selectedTab) {
+                    // タブ1: 手術情報
+                    surgeryInfoTab
+                        .tabItem {
+                            Label("手術情報", systemImage: "heart.text.square")
+                        }
+                        .tag(0)
+                    
+                    // タブ2: 写真管理
+                    PhotoManagementView(surgery: surgery)
+                        .tabItem {
+                            Label("写真管理", systemImage: "photo.on.rectangle")
+                        }
+                        .tag(1)
+                    
+                    // タブ3: 経過情報
+                    followUpListTab
+                        .tabItem {
+                            Label("経過情報", systemImage: "chart.line.uptrend.xyaxis")
+                        }
+                        .tag(2)
+                }
+            }
+            .navigationTitle(surgery.surgeryCategory ?? "手術詳細")
+            .sheet(isPresented: $showEditSurgery) {
+                EditSurgeryView(surgery: surgery, context: viewContext)
+            }
+            .sheet(isPresented: $showAddFollowUp) {
+                AddFollowUpView(surgery: surgery)
+                    .environment(\.managedObjectContext, viewContext)
+            }
+            .alert("手術削除の確認", isPresented: $showDeleteConfirm) {
+                Button("キャンセル", role: .cancel) {}
+                Button("削除", role: .destructive) {
+                    deleteSurgery()
+                }
+            } message: {
+                Text("この手術と関連する全てのデータ（写真、経過情報）が削除されます。この操作は取り消せません。")
             }
         }
         .frame(minWidth: 900, idealWidth: 1000, minHeight: 750)
-        .navigationTitle(surgery.surgeryCategory ?? "手術詳細")
-        .sheet(isPresented: $showEditSurgery) {
-            EditSurgeryView(surgery: surgery, context: viewContext)
-        }
-        .sheet(isPresented: $showAddFollowUp) {
-            AddFollowUpView(surgery: surgery)
-                .environment(\.managedObjectContext, viewContext)
-        }
-        .alert("手術削除の確認", isPresented: $showDeleteConfirm) {
-            Button("キャンセル", role: .cancel) {}
-            Button("削除", role: .destructive) {
-                deleteSurgery()
+        .sheet(isPresented: $showFollowUpDetail) {
+            if let followUp = selectedFollowUp {
+                NavigationView {
+                    FollowUpDetailView(followUp: followUp, surgery: surgery)
+                        .environment(\.managedObjectContext, viewContext)
+                }
+                .frame(width: 850, height: 750)
+                .fixedSize()
             }
-        } message: {
-            Text("この手術と関連する全てのデータ（写真、経過情報）が削除されます。この操作は取り消せません。")
         }
     }
     
@@ -434,7 +448,13 @@ struct SurgeryDetailView: View {
                 } else {
                     VStack(spacing: 12) {
                         ForEach(followUpData, id: \.objectID) { followUp in
-                            FollowUpRowView(followUp: followUp)
+                            Button(action: {
+                                selectedFollowUp = followUp
+                                showFollowUpDetail = true
+                            }) {
+                                FollowUpRowView(followUp: followUp)
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                     .padding()
@@ -447,7 +467,7 @@ struct SurgeryDetailView: View {
     
     private var followUpData: [FollowUp] {
         let followUpSet = surgery.followUps as? Set<FollowUp> ?? []
-        return followUpSet.sorted { 
+        return followUpSet.sorted {
             ($0.measurementDate ?? Date.distantPast) > ($1.measurementDate ?? Date.distantPast)
         }
     }

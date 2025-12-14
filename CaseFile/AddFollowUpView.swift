@@ -17,6 +17,9 @@ struct AddFollowUpView: View {
     @State private var dayAfterSurgery: Int = 0
     @State private var retentionRateRight: Double = 0
     @State private var retentionRateLeft: Double = 0
+    @State private var showAlert = false
+    @State private var alertTitle = ""
+    @State private var alertMessage = ""
     
     var body: some View {
         NavigationView {
@@ -62,6 +65,11 @@ struct AddFollowUpView: View {
             }
             .onAppear {
                 calculateDayAfterSurgery()
+            }
+            .alert(alertTitle, isPresented: $showAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(alertMessage)
             }
         }
         .frame(minWidth: 550, minHeight: 450)
@@ -272,10 +280,19 @@ struct AddFollowUpView: View {
         do {
             try context.save()
             print("✅ 経過情報を保存しました")
-            print("保存内容: \(notesText)")
-            dismiss()
+            
+            alertTitle = "保存完了"
+            alertMessage = "経過情報を保存しました。"
+            showAlert = true
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                dismiss()
+            }
         } catch {
             print("❌ 経過情報の保存に失敗: \(error.localizedDescription)")
+            alertTitle = "保存失敗"
+            alertMessage = "経過情報の保存に失敗しました。\n\nエラー: \(error.localizedDescription)"
+            showAlert = true
         }
     }
 }

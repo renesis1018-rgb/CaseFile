@@ -1,0 +1,594 @@
+import SwiftUI
+import CoreData
+
+struct SurgeryDetailView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.dismiss) private var dismiss
+    
+    @ObservedObject var surgery: Surgery
+    @State private var selectedTab = 0
+    @State private var showEditView = false
+    @State private var showDeleteAlert = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // ヘッダー
+            headerView
+            
+            // タブビュー
+            TabView(selection: $selectedTab) {
+                // 手術情報タブ
+                surgeryInfoTab
+                    .tabItem {
+                        Label("手術情報", systemImage: "doc.text")
+                    }
+                    .tag(0)
+                
+                // 写真管理タブ
+                photoManagementTab
+                    .tabItem {
+                        Label("写真管理", systemImage: "photo.on.rectangle")
+                    }
+                    .tag(1)
+                
+                // 経過情報タブ
+                followUpTab
+                    .tabItem {
+                        Label("経過情報", systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                    .tag(2)
+            }
+        }
+        .frame(minWidth: 1000, idealWidth: 1200, minHeight: 700, idealHeight: 850)
+        .sheet(isPresented: $showEditView) {
+            EditSurgeryView(surgery: surgery)
+        }
+        .alert("削除確認", isPresented: $showDeleteAlert) {
+            Button("キャンセル", role: .cancel) { }
+            Button("削除", role: .destructive) {
+                deleteSurgery()
+            }
+        } message: {
+            Text("この手術記録を削除してもよろしいですか？")
+        }
+    }
+    
+    // MARK: - Header
+    
+    private var headerView: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(surgery.surgeryDate?.formatted(date: .long, time: .omitted) ?? "日付未設定")
+                    .font(.title2)
+                    .bold()
+                
+                HStack(spacing: 8) {
+                    Text(surgery.surgeryCategory ?? "未分類")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    if let type = surgery.surgeryType {
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        Text(type)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            Button(action: { showEditView = true }) {
+                Label("編集", systemImage: "pencil")
+            }
+            .buttonStyle(.bordered)
+            
+            Button(action: { showDeleteAlert = true }) {
+                Label("削除", systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    // MARK: - 手術情報タブ
+    
+    private var surgeryInfoTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // 基本情報
+                basicInfoSection
+                
+                // 患者背景（豊胸系のみ）
+                if surgery.surgeryCategory == "豊胸系" {
+                    patientHistorySection
+                }
+                
+                // 体格・身体測定
+                bodyMeasurementsSection
+                
+                // 術前測定値（豊胸系のみ）
+                if surgery.surgeryCategory == "豊胸系" {
+                    preOpMeasurementsSection
+                }
+                
+                // 脂肪注入詳細（脂肪注入の場合）
+                if surgery.surgeryType == "脂肪注入" {
+                    fatInjectionSection
+                }
+                
+                // シリコン詳細（シリコンパッド挿入の場合）
+                if surgery.surgeryType == "シリコンパッド挿入" {
+                    siliconeSection
+                }
+                
+                // 脂肪吸引詳細
+                if surgery.surgeryCategory == "脂肪吸引" {
+                    liposuctionSection
+                }
+            }
+            .padding()
+        }
+    }
+    
+    // MARK: - 写真管理タブ
+    
+    private var photoManagementTab: some View {
+        VStack {
+            Text("写真管理機能")
+                .font(.title2)
+            Text("（Phase 5で実装予定）")
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    // MARK: - 経過情報タブ
+    
+    private var followUpTab: some View {
+        VStack(spacing: 0) {
+            // 固定ヘッダー
+            HStack {
+                Text("経過記録")
+                    .font(.title2)
+                    .bold()
+                
+                Spacer()
+                
+                NavigationLink(destination: AddFollowUpView(surgery: surgery)) {
+                    Label("経過情報追加", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            
+            Divider()
+            
+            // スクロール可能なコンテンツ
+            ScrollView {
+                if let followUps = surgery.followUps?.allObjects as? [FollowUp], !followUps.isEmpty {
+                    let sortedFollowUps = followUps.sorted {
+                        guard let date1 = $0.followUpDate, let date2 = $1.followUpDate else {
+                            return false
+                        }
+                        return date1 > date2
+                    }
+                    
+                    LazyVStack(spacing: 12) {
+                        ForEach(sortedFollowUps, id: \.objectID) { followUp in
+                            NavigationLink(destination: FollowUpDetailView(followUp: followUp)) {
+                                FollowUpRowView(followUp: followUp)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
+                } else {
+                    VStack(spacing: 16) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 48))
+                            .foregroundColor(.secondary)
+                        
+                        Text("経過情報が登録されていません")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        Text("「経過情報追加」ボタンから登録してください")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                }
+            }
+        }
+    }
+    
+    // MARK: - Sections
+    
+    private var basicInfoSection: some View {
+        GroupBox(label: Label("基本情報", systemImage: "info.circle")) {
+            VStack(spacing: 12) {
+                InfoRow(label: "手術日", value: surgery.surgeryDate?.formatted(date: .long, time: .omitted) ?? "未設定")
+                InfoRow(label: "カテゴリー", value: surgery.surgeryCategory ?? "未設定")
+                InfoRow(label: "術式", value: surgery.surgeryType ?? "未設定")
+                if let caseType = surgery.caseType, !caseType.isEmpty {
+                    InfoRow(label: "症例区分", value: caseType)
+                }
+                if let accessType = surgery.accessType, !accessType.isEmpty {
+                    InfoRow(label: "アクセス", value: accessType)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var patientHistorySection: some View {
+        GroupBox(label: Label("患者背景", systemImage: "person.text.rectangle")) {
+            VStack(spacing: 12) {
+                InfoRow(label: "喫煙歴", value: surgery.smokingHistory ? "あり" : "なし")
+                InfoRow(label: "授乳経験", value: surgery.breastfeedingHistory ? "あり" : "なし")
+                InfoRow(label: "手術回数", value: "\(surgery.numberOfProcedures)回")
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var bodyMeasurementsSection: some View {
+        GroupBox(label: Label("体格・身体測定", systemImage: "figure.arms.open")) {
+            VStack(spacing: 12) {
+                InfoRow(label: "身長", value: heightText)
+                InfoRow(label: "体重", value: bodyWeightText)
+                InfoRow(label: "BMI", value: bmiText)
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var preOpMeasurementsSection: some View {
+        GroupBox(label: Label("術前測定値", systemImage: "ruler")) {
+            VStack(spacing: 12) {
+                HStack {
+                    Text("Vectra測定")
+                        .frame(width: 120, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    
+                    Text("右: \(preOpVectraRText)")
+                    Spacer()
+                    Text("左: \(preOpVectraLText)")
+                }
+                
+                HStack {
+                    Text("NAC - IMF距離")
+                        .frame(width: 120, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    
+                    Text("右: \(nacImfRText)")
+                    Spacer()
+                    Text("左: \(nacImfLText)")
+                }
+                
+                HStack {
+                    Text("皮膚厚")
+                        .frame(width: 120, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    
+                    Text("右: \(skinThicknessRText)")
+                    Spacer()
+                    Text("左: \(skinThicknessLText)")
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var fatInjectionSection: some View {
+        GroupBox(label: Label("脂肪注入詳細", systemImage: "drop")) {
+            VStack(spacing: 16) {
+                // 注入量
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("注入量")
+                        .font(.headline)
+                    
+                    HStack {
+                        Text("右:")
+                            .frame(width: 100, alignment: .leading)
+                            .foregroundColor(.secondary)
+                        Text(injectionVolumeRText)
+                    }
+                    
+                    HStack {
+                        Text("左:")
+                            .frame(width: 100, alignment: .leading)
+                            .foregroundColor(.secondary)
+                        Text(injectionVolumeLText)
+                    }
+                }
+                
+                Divider()
+                
+                // 各層への注入量
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("層別注入量（右側）")
+                        .font(.headline)
+                    
+                    ForEach([
+                        ("皮下層", injectionSubcutaneousRText),
+                        ("腺下層", injectionSubglandularRText),
+                        ("大胸筋下層", injectionSubmuscularRText),
+                        ("腺内注入", injectionIntraglandularRText)
+                    ], id: \.0) { layer in
+                        HStack {
+                            Text(layer.0)
+                                .frame(width: 120, alignment: .leading)
+                                .foregroundColor(.secondary)
+                            Text(layer.1)
+                        }
+                    }
+                }
+                
+                Divider()
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("層別注入量（左側）")
+                        .font(.headline)
+                    
+                    ForEach([
+                        ("皮下層", injectionSubcutaneousLText),
+                        ("腺下層", injectionSubglandularLText),
+                        ("大胸筋下層", injectionSubmuscularLText),
+                        ("腺内注入", injectionIntraglandularLText)
+                    ], id: \.0) { layer in
+                        HStack {
+                            Text(layer.0)
+                                .frame(width: 120, alignment: .leading)
+                                .foregroundColor(.secondary)
+                            Text(layer.1)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var siliconeSection: some View {
+        GroupBox(label: Label("シリコンパッド詳細", systemImage: "square.stack.3d.up")) {
+            VStack(spacing: 12) {
+                HStack {
+                    Text("メーカー")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(surgery.siliconeManufacturer ?? "未入力")
+                }
+                
+                HStack {
+                    Text("容量（右）")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(siliconeVolumeRText)
+                }
+                
+                HStack {
+                    Text("容量（左）")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(siliconeVolumeLText)
+                }
+                
+                HStack {
+                    Text("ロット番号（右）")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(surgery.siliconeLotNoR ?? "未入力")
+                }
+                
+                HStack {
+                    Text("ロット番号（左）")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(surgery.siliconeLotNoL ?? "未入力")
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    private var liposuctionSection: some View {
+        GroupBox(label: Label("脂肪吸引詳細", systemImage: "waveform.path.ecg")) {
+            VStack(spacing: 12) {
+                HStack {
+                    Text("吸引部位")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(surgery.liposuctionSite ?? "未入力")
+                }
+                
+                HStack {
+                    Text("吸引量")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(liposuctionVolumeText)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var heightText: String {
+        guard let height = surgery.heightCm?.doubleValue, height > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.1f cm", height)
+    }
+    
+    private var bodyWeightText: String {
+        guard let weight = surgery.bodyWeightKg?.doubleValue, weight > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.1f kg", weight)
+    }
+    
+    private var bmiText: String {
+        guard let bmi = surgery.bmi?.doubleValue, bmi > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.1f", bmi)
+    }
+    
+    private var preOpVectraRText: String {
+        guard let value = surgery.preOpVectraR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var preOpVectraLText: String {
+        guard let value = surgery.preOpVectraL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var nacImfRText: String {
+        guard let value = surgery.nacImfDistanceR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.1f cm", value)
+    }
+    
+    private var nacImfLText: String {
+        guard let value = surgery.nacImfDistanceL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.1f cm", value)
+    }
+    
+    private var skinThicknessRText: String {
+        guard let value = surgery.skinThicknessR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.1f cm", value)
+    }
+    
+    private var skinThicknessLText: String {
+        guard let value = surgery.skinThicknessL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.1f cm", value)
+    }
+    
+    private var injectionVolumeRText: String {
+        guard let value = surgery.injectionVolumeR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionVolumeLText: String {
+        guard let value = surgery.injectionVolumeL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionSubcutaneousRText: String {
+        guard let value = surgery.injectionSubcutaneousR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionSubcutaneousLText: String {
+        guard let value = surgery.injectionSubcutaneousL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionSubglandularRText: String {
+        guard let value = surgery.injectionSubglandularR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionSubglandularLText: String {
+        guard let value = surgery.injectionSubglandularL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionSubmuscularRText: String {
+        guard let value = surgery.injectionSubmuscularR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionSubmuscularLText: String {
+        guard let value = surgery.injectionSubmuscularL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionIntraglandularRText: String {
+        guard let value = surgery.injectionIntraglandularR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var injectionIntraglandularLText: String {
+        guard let value = surgery.injectionIntraglandularL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var siliconeVolumeRText: String {
+        guard let value = surgery.siliconeVolumeR?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var siliconeVolumeLText: String {
+        guard let value = surgery.siliconeVolumeL?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    private var liposuctionVolumeText: String {
+        guard let value = surgery.liposuctionVolume?.doubleValue, value > 0 else {
+            return "未入力"
+        }
+        return String(format: "%.0f cc", value)
+    }
+    
+    // MARK: - Actions
+    
+    private func deleteSurgery() {
+        viewContext.delete(surgery)
+        
+        do {
+            try viewContext.save()
+            dismiss()
+        } catch {
+            print("削除エラー: \(error)")
+        }
+    }
+}
+
+// MARK: - Supporting Views
+// InfoRowとFollowUpRowViewは別ファイルで定義済み

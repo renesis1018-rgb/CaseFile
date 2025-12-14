@@ -12,8 +12,8 @@
         <attribute name="bodyWeightKg" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="breastQScore" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="NO"/>
         <attribute name="followUpDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
-        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
-        <attribute name="measurementDate" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="measurementDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="notes" optional="YES" attributeType="String"/>
         <attribute name="o2Capsule" optional="YES" attributeType="String"/>
         <attribute name="postOpVectraL" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="NO"/>
@@ -23,8 +23,8 @@
         <attribute name="retentionRateR" optional="YES" attributeType="Double" defaultValueString="0" usesScalarValueType="NO"/>
         <attribute name="retentionRateRight" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="smokingStatus" optional="YES" attributeType="String"/>
-        <attribute name="timing" attributeType="String"/>
-        <attribute name="vectraPerformed" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="NO"/>
+        <attribute name="timing" optional="YES" attributeType="String"/>
+        <attribute name="vectraPerformed" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="NO"/>
         <attribute name="vectraVolumeLeft" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <attribute name="vectraVolumeRight" optional="YES" attributeType="Double" usesScalarValueType="NO"/>
         <relationship name="surgery" maxCount="1" deletionRule="Nullify" destinationEntity="Surgery" inverseName="followUps" inverseEntity="Surgery"/>

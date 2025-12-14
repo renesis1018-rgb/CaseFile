@@ -1,0 +1,9 @@
+@@ -181,7 +181,7 @@
+                     
+                     LazyVStack(spacing: 12) {
+                         ForEach(sortedFollowUps, id: \.objectID) { followUp in
+-                            NavigationLink(destination: FollowUpDetailView(followUp: followUp)) {
++                            NavigationLink(destination: FollowUpDetailView(surgery: surgery, followUp: followUp)) {
+                                 FollowUpRowView(followUp: followUp)
+                             }
+                             .buttonStyle(PlainButtonStyle())
