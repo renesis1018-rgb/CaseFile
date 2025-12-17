@@ -19,6 +19,9 @@ struct PatientDetailView: View {
     @State private var selectedSurgery: Surgery?
     @State private var showSurgeryDetail = false
     
+    // ✅ 追加: リフレッシュ用
+    @State private var refreshID = UUID()
+    
     // MARK: - Computed
     
     private var surgeries: [Surgery] {
@@ -49,8 +52,19 @@ struct PatientDetailView: View {
             }
             .padding()
         }
+        .id(refreshID)  // ✅ 追加: リフレッシュ時にViewを再生成
         .navigationTitle(patient.patientId ?? "患者詳細")
         .toolbar {
+            // ✅ 追加: リロードボタン
+            ToolbarItem(placement: .automatic) {
+                Button(action: {
+                    refreshID = UUID()
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("ウィンドウサイズを再調整")
+            }
+            
             ToolbarItem(placement: .automatic) {
                 Menu {
                     Button(action: { showEditPatient = true }) {

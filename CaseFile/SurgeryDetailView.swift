@@ -20,6 +20,9 @@ struct SurgeryDetailView: View {
     @State private var selectedFollowUp: FollowUp?
     @State private var showFollowUpDetail = false
     
+    // ✅ 追加: リフレッシュ用
+    @State private var refreshID = UUID()
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -52,6 +55,7 @@ struct SurgeryDetailView: View {
                         .tag(2)
                 }
             }
+            .id(refreshID)  // ✅ 追加: リフレッシュ時にViewを再生成
             .navigationTitle(surgery.surgeryCategory ?? "手術詳細")
             .sheet(isPresented: $showEditSurgery) {
                 EditSurgeryView(surgery: surgery, context: viewContext)
@@ -72,12 +76,8 @@ struct SurgeryDetailView: View {
         .frame(minWidth: 900, idealWidth: 1000, minHeight: 750)
         .sheet(isPresented: $showFollowUpDetail) {
             if let followUp = selectedFollowUp {
-                NavigationView {
-                    FollowUpDetailView(followUp: followUp, surgery: surgery)
-                        .environment(\.managedObjectContext, viewContext)
-                }
-                .frame(width: 850, height: 750)
-                .fixedSize()
+                FollowUpDetailSheetView(followUp: followUp, surgery: surgery)
+                    .environment(\.managedObjectContext, viewContext)
             }
         }
     }
@@ -86,6 +86,15 @@ struct SurgeryDetailView: View {
     private var customHeader: some View {
         HStack {
             Spacer()
+            
+            // ✅ 追加: リロードボタン
+            Button(action: {
+                refreshID = UUID()
+            }) {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help("ウィンドウサイズを再調整")
+            .buttonStyle(.plain)
             
             // 手術情報編集ボタン
             Button(action: { showEditSurgery = true }) {
@@ -500,6 +509,45 @@ struct SurgeryDetailView: View {
         formatter.dateFormat = "yyyy年M月d日"
         formatter.locale = Locale(identifier: "ja_JP")
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - FollowUp Detail Sheet View (サイズ制御用ラッパー)
+
+struct FollowUpDetailSheetView: View {
+    let followUp: FollowUp
+    let surgery: Surgery
+    
+    var body: some View {
+        NavigationView {
+            FollowUpDetailView(followUp: followUp, surgery: surgery)
+        }
+        .frame(minWidth: 850, minHeight: 750)
+        .background(WindowAccessor { window in
+            window?.setContentSize(NSSize(width: 850, height: 750))
+            window?.minSize = NSSize(width: 850, height: 750)
+            window?.maxSize = NSSize(width: 1200, height: 1000)
+        })
+    }
+}
+
+// MARK: - Window Accessor (NSWindow 直接制御)
+
+struct WindowAccessor: NSViewRepresentable {
+    let callback: (NSWindow?) -> Void
+    
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            self.callback(view.window)
+        }
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            self.callback(nsView.window)
+        }
     }
 }
 

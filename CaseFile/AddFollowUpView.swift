@@ -7,7 +7,7 @@ struct AddFollowUpView: View {
     
     let surgery: Surgery
     
-    @State private var followUpDate = Date()
+    @State private var measurementDate = Date()
     @State private var vectraValueRight: String = ""
     @State private var vectraValueLeft: String = ""
     @State private var bodyWeight: String = ""
@@ -54,7 +54,7 @@ struct AddFollowUpView: View {
                     }
                 }
             }
-            .onChange(of: followUpDate) {
+            .onChange(of: measurementDate) {
                 calculateDayAfterSurgery()
             }
             .onChange(of: vectraValueRight) {
@@ -78,7 +78,7 @@ struct AddFollowUpView: View {
     // MARK: - 基本情報セクション
     private var basicInfoSection: some View {
         Section(header: Text("基本情報")) {
-            DatePicker("経過観察日", selection: $followUpDate, displayedComponents: .date)
+            DatePicker("経過観察日", selection: $measurementDate, displayedComponents: .date)
             
             HStack {
                 Text("術後日数")
@@ -195,7 +195,7 @@ struct AddFollowUpView: View {
     private func calculateDayAfterSurgery() {
         guard let surgeryDate = surgery.surgeryDate else { return }
         let calendar = Calendar.current
-        let components = calendar.dateComponents([.day], from: surgeryDate, to: followUpDate)
+        let components = calendar.dateComponents([.day], from: surgeryDate, to: measurementDate)
         dayAfterSurgery = components.day ?? 0
     }
     
@@ -236,8 +236,16 @@ struct AddFollowUpView: View {
     private func saveFollowUp() {
         let newFollowUp = FollowUp(context: context)
         newFollowUp.id = UUID()
-        newFollowUp.followUpDate = followUpDate
+        newFollowUp.measurementDate = measurementDate  // ✅ 修正: followUpDate → measurementDate
         newFollowUp.surgery = surgery
+        
+        // ✅ 追加: Core Data属性に直接保存
+        newFollowUp.postOpVectraR = vectraValueRight.isEmpty ? nil : NSNumber(value: Double(vectraValueRight)!)
+        newFollowUp.postOpVectraL = vectraValueLeft.isEmpty ? nil : NSNumber(value: Double(vectraValueLeft)!)
+        newFollowUp.bodyWeight = bodyWeight.isEmpty ? nil : NSNumber(value: Double(bodyWeight)!)
+        
+        // ✅ 追加: タイミングを自動設定
+        newFollowUp.timing = "\(dayAfterSurgery)日後"
         
         // 備考欄にすべての情報を保存
         var notesText = ""
