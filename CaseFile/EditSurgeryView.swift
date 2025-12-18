@@ -2,7 +2,7 @@
 //  EditSurgeryView.swift
 //  CaseFile
 //
-//  手術情報編集画面（Phase 3改良版）
+//  手術情報編集画面（Phase 3改良版 + 脂肪吸引部位編集対応）
 //
 
 import SwiftUI
@@ -55,11 +55,18 @@ struct EditSurgeryView: View {
     @State private var incisionSite: String = ""
     @State private var insertionPlane: String = ""
     
-    // MARK: - 脂肪吸引
-    @State private var attractionAreas: [String] = []
+    // MARK: - 脂肪吸引（✅ 修正: 部位選択を配列で管理）
+    @State private var selectedLiposuctionAreas: Set<String> = []
     @State private var liposuctionVolume: String = ""
     @State private var aquicellUsed: Bool = false
     @State private var vaserUsed: Bool = false
+    
+    // ✅ 脂肪吸引部位リスト（AddSurgeryViewと同じ）
+    let liposuctionAreas: [(category: String, items: [String])] = [
+        ("上肢", ["二の腕", "肩", "肩甲骨横"]),
+        ("体幹", ["腹", "ウエスト", "腰", "背中上", "背中下"]),
+        ("下肢", ["大腿", "臀部", "膝", "下腿", "足首"])
+    ]
     
     // MARK: - その他
     @State private var notes: String = ""
@@ -420,12 +427,94 @@ struct EditSurgeryView: View {
         }
     }
     
+    // ✅ 修正: 脂肪吸引セクション（部位選択機能を追加）
     private var liposuctionSection: some View {
         GroupBox(label: Label("脂肪吸引詳細", systemImage: "tornado")) {
             VStack(spacing: 12) {
-                // 吸引部位（表示のみ、surgeryTypeから取得）
-                HStack {
+                // ✅ 追加: 吸引部位選択
+                VStack(alignment: .leading, spacing: 12) {
                     Text("吸引部位")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    // AddSurgeryViewと同じ部位選択UI
+                    VStack(alignment: .leading, spacing: 12) {
+                        // 上肢
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("上肢")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(.blue)
+                            
+                            ForEach(["二の腕", "肩", "肩甲骨横"], id: \.self) { area in
+                                Toggle(area, isOn: Binding(
+                                    get: { selectedLiposuctionAreas.contains(area) },
+                                    set: { isSelected in
+                                        if isSelected {
+                                            selectedLiposuctionAreas.insert(area)
+                                        } else {
+                                            selectedLiposuctionAreas.remove(area)
+                                        }
+                                    }
+                                ))
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                        .padding(.leading, 8)
+                        
+                        // 体幹
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("体幹")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(.blue)
+                            
+                            ForEach(["腹", "ウエスト", "腰", "背中上", "背中下"], id: \.self) { area in
+                                Toggle(area, isOn: Binding(
+                                    get: { selectedLiposuctionAreas.contains(area) },
+                                    set: { isSelected in
+                                        if isSelected {
+                                            selectedLiposuctionAreas.insert(area)
+                                        } else {
+                                            selectedLiposuctionAreas.remove(area)
+                                        }
+                                    }
+                                ))
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                        .padding(.leading, 8)
+                        
+                        // 下肢
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("下肢")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(.blue)
+                            
+                            ForEach(["大腿", "臀部", "膝", "下腿", "足首"], id: \.self) { area in
+                                Toggle(area, isOn: Binding(
+                                    get: { selectedLiposuctionAreas.contains(area) },
+                                    set: { isSelected in
+                                        if isSelected {
+                                            selectedLiposuctionAreas.insert(area)
+                                        } else {
+                                            selectedLiposuctionAreas.remove(area)
+                                        }
+                                    }
+                                ))
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                        .padding(.leading, 8)
+                    }
+                }
+                
+                Divider()
+                
+                // 術式（表示のみ）
+                HStack {
+                    Text("術式")
                         .font(.subheadline)
                         .fontWeight(.medium)
                     Spacer()
@@ -545,7 +634,11 @@ struct EditSurgeryView: View {
         incisionSite = surgery.incisionSite ?? ""
         insertionPlane = surgery.insertionPlane ?? ""
         
-        // 脂肪吸引
+        // ✅ 脂肪吸引部位の読み込みを追加
+        if let donorSite = surgery.donorSite, surgeryCategory == "脂肪吸引" {
+            selectedLiposuctionAreas = Set(donorSite.components(separatedBy: ", "))
+        }
+        
         liposuctionVolume = surgery.liposuctionVolume?.stringValue ?? ""
         aquicellUsed = surgery.aquicellUsed?.boolValue ?? false
         vaserUsed = surgery.vaserUsed?.boolValue ?? false
@@ -579,8 +672,11 @@ struct EditSurgeryView: View {
         surgery.skinThicknessLeft = parseDouble(skinThicknessLeft)
         
         // 脂肪注入
-        surgery.donorSite = donorSite.isEmpty ? nil : donorSite
-        surgery.donorSiteOther = donorSiteOther.isEmpty ? nil : donorSiteOther
+        if surgeryCategory == "豊胸系" && surgeryType.contains("脂肪注入") {
+            surgery.donorSite = donorSite.isEmpty ? nil : donorSite
+            surgery.donorSiteOther = donorSiteOther.isEmpty ? nil : donorSiteOther
+        }
+        
         surgery.subcutaneousRight = parseDouble(subcutaneousRight)
         surgery.subcutaneousLeft = parseDouble(subcutaneousLeft)
         surgery.subglandularRight = parseDouble(subglandularRight)
@@ -597,7 +693,12 @@ struct EditSurgeryView: View {
         surgery.incisionSite = incisionSite.isEmpty ? nil : incisionSite
         surgery.insertionPlane = insertionPlane.isEmpty ? nil : insertionPlane
         
-        // 脂肪吸引
+        // ✅ 脂肪吸引部位の保存を修正
+        if surgeryCategory == "脂肪吸引" {
+            let selectedAreasString = selectedLiposuctionAreas.sorted().joined(separator: ", ")
+            surgery.donorSite = selectedAreasString.isEmpty ? nil : selectedAreasString
+        }
+        
         surgery.liposuctionVolume = parseDouble(liposuctionVolume)
         surgery.aquicellUsed = NSNumber(value: aquicellUsed)
         surgery.vaserUsed = NSNumber(value: vaserUsed)
@@ -689,9 +790,12 @@ private struct InfoRowReadOnly: View {
 
 // MARK: - Preview
 
+
 #Preview {
-    EditSurgeryView(
-        surgery: PersistenceController.preview.container.viewContext.registeredObjects.first(where: { $0 is Surgery }) as! Surgery,
-        context: PersistenceController.preview.container.viewContext
-    )
+    NavigationView {
+        SurgeryDetailView(
+            surgery: PersistenceController.preview.container.viewContext.registeredObjects.first(where: { $0 is Surgery }) as! Surgery
+        )
+    }
+    .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
 }

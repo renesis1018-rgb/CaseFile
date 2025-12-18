@@ -1,9 +1,8 @@
-//
 //  SurgeryDetailView.swift
 //  CaseFile
 //
 //  手術詳細画面（タブ表示: 手術情報・写真管理・経過情報）
-//  Phase 3改善版: 全属性の完全表示対応 + ツールバー修正
+//  Phase 3改善版: 全属性の完全表示対応 + ツールバー修正 + 脂肪吸引部位表示修正 + Rキーリロード対応
 //
 
 import SwiftUI
@@ -22,6 +21,25 @@ struct SurgeryDetailView: View {
     
     // ✅ 追加: リフレッシュ用
     @State private var refreshID = UUID()
+    @FocusState private var isFocused: Bool  // ✅ 追加: フォーカス管理
+    
+    // MARK: - リロード処理
+    private func reloadSurgeryData() {
+        // Core Dataから最新データを再取得
+        viewContext.refresh(surgery, mergeChanges: true)
+        
+        // 関連する経過情報も再読み込み
+        if let followUps = surgery.followUps as? Set<FollowUp> {
+            followUps.forEach { followUp in
+                viewContext.refresh(followUp, mergeChanges: true)
+            }
+        }
+        
+        // UIも更新
+        refreshID = UUID()
+        
+        print("✅ 手術データをリロードしました")
+    }
     
     var body: some View {
         NavigationView {
@@ -74,6 +92,18 @@ struct SurgeryDetailView: View {
             }
         }
         .frame(minWidth: 900, idealWidth: 1000, minHeight: 750)
+        .focusable()  // ✅ 追加: キーボードイベントを受け取れるようにする
+        .focused($isFocused)  // ✅ 追加: フォーカス管理
+        .onAppear {
+            isFocused = true  // ✅ 追加: 表示時に自動フォーカス
+        }
+        .onKeyPress(characters: .alphanumerics) { press in  // ✅ 追加: Rキーのキャプチャ
+            if press.characters == "r" || press.characters == "R" {
+                reloadSurgeryData()
+                return .handled
+            }
+            return .ignored
+        }
         .sheet(isPresented: $showFollowUpDetail) {
             if let followUp = selectedFollowUp {
                 FollowUpDetailSheetView(followUp: followUp, surgery: surgery)
@@ -87,13 +117,13 @@ struct SurgeryDetailView: View {
         HStack {
             Spacer()
             
-            // ✅ 追加: リロードボタン
+            // ✅ 修正: リロードボタン
             Button(action: {
-                refreshID = UUID()
+                reloadSurgeryData()
             }) {
-                Image(systemName: "arrow.clockwise")
+                Label("再読み込み", systemImage: "arrow.clockwise")
             }
-            .help("ウィンドウサイズを再調整")
+            .help("キーボード: R で再読み込み")
             .buttonStyle(.plain)
             
             // 手術情報編集ボタン
@@ -386,7 +416,7 @@ struct SurgeryDetailView: View {
         }
     }
     
-    // MARK: - 脂肪吸引詳細
+    // MARK: - 脂肪吸引詳細（修正版）
     private var liposuctionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("脂肪吸引詳細")
@@ -394,10 +424,32 @@ struct SurgeryDetailView: View {
                 .fontWeight(.bold)
             
             VStack(spacing: 8) {
-                InfoRow(label: "吸引部位", value: surgery.surgeryType ?? "未入力", labelWidth: 180)
-                InfoRow(label: "総吸引量", value: surgery.liposuctionVolume != nil ? "\(surgery.liposuctionVolume!.stringValue) cc" : "未入力", labelWidth: 180)
-                InfoRow(label: "Aquicell使用", value: surgery.aquicellUsed ?? false, labelWidth: 180)
-                InfoRow(label: "Vaser使用", value: surgery.vaserUsed ?? false, labelWidth: 180)
+                // ✅ 修正: donorSiteから吸引部位を表示
+                InfoRow(
+                    label: "吸引部位",
+                    value: surgery.donorSite ?? "未入力",
+                    labelWidth: 180
+                )
+                InfoRow(
+                    label: "術式",
+                    value: surgery.surgeryType ?? "未入力",
+                    labelWidth: 180
+                )
+                InfoRow(
+                    label: "総吸引量",
+                    value: surgery.liposuctionVolume != nil ? "\(surgery.liposuctionVolume!.stringValue) cc" : "未入力",
+                    labelWidth: 180
+                )
+                InfoRow(
+                    label: "Aquicell使用",
+                    value: surgery.aquicellUsed ?? false,
+                    labelWidth: 180
+                )
+                InfoRow(
+                    label: "Vaser使用",
+                    value: surgery.vaserUsed ?? false,
+                    labelWidth: 180
+                )
             }
             .padding()
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
@@ -477,7 +529,8 @@ struct SurgeryDetailView: View {
     private var followUpData: [FollowUp] {
         let followUpSet = surgery.followUps as? Set<FollowUp> ?? []
         return followUpSet.sorted {
-            ($0.measurementDate ?? Date.distantPast) > ($1.measurementDate ?? Date.distantPast)
+            // ✅ 修正: followUpDate を使用
+            ($0.followUpDate ?? Date.distantPast) > ($1.followUpDate ?? Date.distantPast)
         }
     }
     
@@ -559,7 +612,8 @@ struct FollowUpRowView: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                if let date = followUp.measurementDate {
+                // ✅ 修正: followUpDate を使用
+                if let date = followUp.followUpDate {
                     Text(formatDate(date))
                         .font(.system(size: 14, weight: .semibold))
                 }

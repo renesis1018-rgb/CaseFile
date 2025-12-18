@@ -2,7 +2,7 @@
 //  PatientDetailView.swift
 //  CaseFile
 //
-//  患者詳細画面（手術履歴一覧）
+//  患者詳細画面（手術履歴一覧）+ 手術カード詳細表示対応
 //
 
 import SwiftUI
@@ -21,6 +21,31 @@ struct PatientDetailView: View {
     
     // ✅ 追加: リフレッシュ用
     @State private var refreshID = UUID()
+    
+    // MARK: - リロード処理
+    private func reloadPatientData() {
+        // Core Dataから最新データを再取得
+        viewContext.refresh(patient, mergeChanges: true)
+        
+        // 関連データも再読み込み - 手術履歴
+        if let surgeries = patient.surgeries as? Set<Surgery> {
+            surgeries.forEach { surgery in
+                viewContext.refresh(surgery, mergeChanges: true)
+            }
+        }
+        
+        // 関連データも再読み込み - 血液検査
+        if let labData = patient.labData as? Set<LabData> {
+            labData.forEach { data in
+                viewContext.refresh(data, mergeChanges: true)
+            }
+        }
+        
+        // UIも更新
+        refreshID = UUID()
+        
+        print("✅ 患者データをリロードしました (手術履歴・血液検査)")
+    }
     
     // MARK: - Computed
     
@@ -55,14 +80,15 @@ struct PatientDetailView: View {
         .id(refreshID)  // ✅ 追加: リフレッシュ時にViewを再生成
         .navigationTitle(patient.patientId ?? "患者詳細")
         .toolbar {
-            // ✅ 追加: リロードボタン
+            // ✅ 修正: リロードボタン + Rキーショートカット
             ToolbarItem(placement: .automatic) {
                 Button(action: {
-                    refreshID = UUID()
+                    reloadPatientData()
                 }) {
-                    Image(systemName: "arrow.clockwise")
+                    Label("再読み込み", systemImage: "arrow.clockwise")
                 }
-                .help("ウィンドウサイズを再調整")
+                .keyboardShortcut("r", modifiers: [])
+                .help("キーボード: R で再読み込み")
             }
             
             ToolbarItem(placement: .automatic) {
@@ -285,7 +311,7 @@ struct PatientDetailView: View {
     }
 }
 
-// MARK: - Surgery Row View
+// MARK: - Surgery Row View (✅ 修正: 詳細情報追加)
 
 struct SurgeryRowView: View {
     let surgery: Surgery
@@ -312,6 +338,14 @@ struct SurgeryRowView: View {
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
+                
+                // ✅ 追加: 詳細情報
+                if let detailInfo = surgeryDetailInfo {
+                    Text(detailInfo)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                }
             }
             
             Spacer()
@@ -325,10 +359,47 @@ struct SurgeryRowView: View {
         .cornerRadius(8)
     }
     
+    // ✅ 追加: 手術詳細情報の取得
+    private var surgeryDetailInfo: String? {
+        let category = surgery.surgeryCategory ?? ""
+        let type = surgery.surgeryType ?? ""
+        
+        // 豊胸系 - 脂肪注入
+        if category == "豊胸系" && type.contains("脂肪注入") {
+            // notesから種別を抽出（AddSurgeryViewで【種別】として保存している）
+            if let notes = surgery.notes, notes.contains("【種別】") {
+                let components = notes.components(separatedBy: "【種別】")
+                if components.count > 1 {
+                    let subType = components[1].components(separatedBy: "\n").first ?? ""
+                    return "種類: \(subType)"
+                }
+            }
+            return nil
+        }
+        
+        // 豊胸系 - シリコン
+        if category == "豊胸系" && type.contains("シリコン") {
+            if let manufacturer = surgery.implantManufacturer, !manufacturer.isEmpty {
+                return "メーカー: \(manufacturer)"
+            }
+            return nil
+        }
+        
+        // 脂肪吸引
+        if category == "脂肪吸引" {
+            if let donorSite = surgery.donorSite, !donorSite.isEmpty {
+                return "部位: \(donorSite)"
+            }
+            return nil
+        }
+        
+        return nil
+    }
+    
     private var categoryColor: Color {
         switch surgery.surgeryCategory {
         case "豊胸系": return .pink
-        case "目元": return .blue
+        case "目元系": return .blue
         case "脂肪吸引": return .orange
         default: return .gray
         }

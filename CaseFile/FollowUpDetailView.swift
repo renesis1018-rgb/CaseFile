@@ -16,7 +16,20 @@ struct FollowUpDetailView: View {
     
     @State private var showEditView = false
     @State private var showDeleteAlert = false
-    @State private var refreshID = UUID()  // ✅ 追加: リフレッシュ用
+    @State private var refreshID = UUID()
+    @FocusState private var isFocused: Bool  // ✅ 追加: フォーカス管理
+    
+    // MARK: - リロード処理
+    private func reloadFollowUpData() {
+        // Core Dataから最新データを再取得
+        viewContext.refresh(followUp, mergeChanges: true)
+        viewContext.refresh(surgery, mergeChanges: true)
+        
+        // UIも更新
+        refreshID = UUID()
+        
+        print("✅ 経過情報データをリロードしました")
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -28,13 +41,13 @@ struct FollowUpDetailView: View {
                 
                 Spacer()
                 
-                // ✅ 追加: リロードボタン
+                // リロードボタン
                 Button(action: {
-                    refreshID = UUID()
+                    reloadFollowUpData()
                 }) {
-                    Image(systemName: "arrow.clockwise")
+                    Label("再読み込み", systemImage: "arrow.clockwise")
                 }
-                .help("ウィンドウサイズを再調整")
+                .help("キーボード: R で再読み込み")
                 .buttonStyle(.plain)
                 
                 Button("編集") {
@@ -161,9 +174,22 @@ struct FollowUpDetailView: View {
                 .padding()
             }
         }
-        .id(refreshID)  // ✅ 追加: リフレッシュ時にViewを再生成
+        .id(refreshID)
         .frame(minWidth: 700, idealWidth: 800, maxWidth: 1000,
                minHeight: 600, idealHeight: 700, maxHeight: 900)
+        .focusable()  // ✅ 追加: キーボードイベントを受け取れるようにする
+        .focused($isFocused)  // ✅ 追加: フォーカス管理
+        .onAppear {
+            isFocused = true  // ✅ 追加: 表示時に自動フォーカス
+        }
+        .onKeyPress(characters: .alphanumerics) { press in  // ✅ 修正
+            if press.characters == "r" || press.characters == "R" {
+                reloadFollowUpData()
+                return .handled
+            }
+            return .ignored
+        }
+
         .sheet(isPresented: $showEditView) {
             EditFollowUpView(followUp: followUp, surgery: surgery)
                 .environment(\.managedObjectContext, viewContext)
