@@ -2,7 +2,8 @@
 //  PatientDetailView.swift
 //  CaseFile
 //
-//  患者詳細画面（手術履歴一覧）+ 手術カード詳細表示対応
+//  患者詳細画面(手術履歴一覧) + 手術カード詳細表示対応
+//  ✅ 2025-12-24: procedureフィールド表示対応追加
 //
 
 import SwiftUI
@@ -130,7 +131,7 @@ struct PatientDetailView: View {
                 deletePatient()
             }
         } message: {
-            Text("この患者と関連する全てのデータ（手術、写真、経過情報）が削除されます。この操作は取り消せません。")
+            Text("この患者と関連する全てのデータ(手術、写真、経過情報)が削除されます。この操作は取り消せません。")
         }
     }
     
@@ -311,7 +312,7 @@ struct PatientDetailView: View {
     }
 }
 
-// MARK: - Surgery Row View (✅ 修正: 詳細情報追加)
+// MARK: - Surgery Row View (✅ 修正: procedureフィールド対応)
 
 struct SurgeryRowView: View {
     let surgery: Surgery
@@ -339,7 +340,7 @@ struct SurgeryRowView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                // ✅ 追加: 詳細情報
+                // ✅ 修正: 詳細情報(procedureフィールド対応)
                 if let detailInfo = surgeryDetailInfo {
                     Text(detailInfo)
                         .font(.system(size: 11))
@@ -359,14 +360,19 @@ struct SurgeryRowView: View {
         .cornerRadius(8)
     }
     
-    // ✅ 追加: 手術詳細情報の取得
+    // ✅ 修正: 手術詳細情報の取得(procedureフィールド優先)
     private var surgeryDetailInfo: String? {
         let category = surgery.surgeryCategory ?? ""
         let type = surgery.surgeryType ?? ""
         
         // 豊胸系 - 脂肪注入
-        if category == "豊胸系" && type.contains("脂肪注入") {
-            // notesから種別を抽出（AddSurgeryViewで【種別】として保存している）
+        if category.contains("豊胸") && type.contains("脂肪注入") {
+            // ✅ 優先順位1: procedureフィールドを確認
+            if let procedure = surgery.procedure, !procedure.isEmpty {
+                return "種類: \(procedure)"
+            }
+            
+            // ✅ 優先順位2: notesから種別を抽出(手入力時の互換性)
             if let notes = surgery.notes, notes.contains("【種別】") {
                 let components = notes.components(separatedBy: "【種別】")
                 if components.count > 1 {
@@ -378,7 +384,7 @@ struct SurgeryRowView: View {
         }
         
         // 豊胸系 - シリコン
-        if category == "豊胸系" && type.contains("シリコン") {
+        if category.contains("豊胸") && type.contains("シリコン") {
             if let manufacturer = surgery.implantManufacturer, !manufacturer.isEmpty {
                 return "メーカー: \(manufacturer)"
             }
@@ -386,7 +392,7 @@ struct SurgeryRowView: View {
         }
         
         // 脂肪吸引
-        if category == "脂肪吸引" {
+        if category.contains("脂肪吸引") {
             if let donorSite = surgery.donorSite, !donorSite.isEmpty {
                 return "部位: \(donorSite)"
             }

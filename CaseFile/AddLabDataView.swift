@@ -3,6 +3,7 @@
 //  CaseFile
 //
 //  血液検査データ入力画面（47項目完全対応版）
+//  Fixed: urea → un に変更
 //
 
 import SwiftUI
@@ -41,7 +42,7 @@ struct AddLabDataView: View {
     // MARK: - 生化学系 (10項目)
     @State private var totalProtein = ""
     @State private var uricAcid = ""
-    @State private var urea = ""
+    @State private var un = ""  // ✅ 修正: urea → un
     @State private var indirectBilirubin = ""
     @State private var creatinine = ""
     @State private var iron = ""
@@ -225,7 +226,7 @@ struct AddLabDataView: View {
                 }
                 
                 HStack {
-                    LabValueField(label: "尿素窒素 (UN)", value: $urea, unit: "mg/dL")
+                    LabValueField(label: "尿素窒素 (UN)", value: $un, unit: "mg/dL")  // ✅ 修正
                     LabValueField(label: "I-BIL", value: $indirectBilirubin, unit: "mg/dL")
                 }
                 
@@ -512,8 +513,8 @@ struct AddLabDataView: View {
         if !uricAcid.isEmpty, let value = Double(uricAcid) {
             newLabData.uricAcid = NSNumber(value: value)
         }
-        if !urea.isEmpty, let value = Double(urea) {
-            newLabData.urea = NSNumber(value: value)
+        if !un.isEmpty, let value = Double(un) {  // ✅ 修正
+            newLabData.un = NSNumber(value: value)  // ✅ 修正
         }
         if !indirectBilirubin.isEmpty, let value = Double(indirectBilirubin) {
             newLabData.indirectBilirubin = NSNumber(value: value)

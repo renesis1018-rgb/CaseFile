@@ -1,3 +1,10 @@
+//
+//  AddFollowUpView.swift
+//  CaseFile
+//
+//  経過情報登録画面
+//
+
 import SwiftUI
 import CoreData
 
@@ -27,7 +34,7 @@ struct AddFollowUpView: View {
                 // 基本情報セクション
                 basicInfoSection
                 
-                // 測定値セクション（手術カテゴリーに応じて表示）
+                // 測定値セクション(手術カテゴリーに応じて表示)
                 if shouldShowMeasurements {
                     measurementsSection
                 }
@@ -35,7 +42,7 @@ struct AddFollowUpView: View {
                 // 備考セクション
                 notesSection
                 
-                // 定着率セクション（豊胸系かつ脂肪注入のみ）
+                // 定着率セクション(豊胸系かつ脂肪注入のみ)
                 if shouldShowRetentionRate {
                     retentionRateSection
                 }
@@ -94,7 +101,7 @@ struct AddFollowUpView: View {
     // MARK: - 測定値セクション
     private var measurementsSection: some View {
         Section(header: Text("測定値")) {
-            // 豊胸系（脂肪注入・シリコン）のみVectra値を表示
+            // 豊胸系(脂肪注入・シリコン)のみVectra値を表示
             if isBreastSurgery {
                 HStack {
                     Text("Vectra 右 (cc)")
@@ -111,7 +118,7 @@ struct AddFollowUpView: View {
                 }
             }
             
-            // 豊胸系（脂肪注入・シリコン）・脂肪吸引は体重を表示
+            // 豊胸系(脂肪注入・シリコン)・脂肪吸引は体重を表示
             if isBreastSurgery || isLiposuction {
                 HStack {
                     Text("体重 (kg)")
@@ -132,9 +139,9 @@ struct AddFollowUpView: View {
         }
     }
     
-    // MARK: - 定着率セクション（豊胸系かつ脂肪注入のみ）
+    // MARK: - 定着率セクション(豊胸系かつ脂肪注入のみ)
     private var retentionRateSection: some View {
-        Section(header: Text("定着率（自動計算）")) {
+        Section(header: Text("定着率(自動計算)")) {
             VStack(alignment: .leading, spacing: 12) {
                 retentionRateRow(side: "右", rate: retentionRateRight)
                 Divider()
@@ -205,17 +212,25 @@ struct AddFollowUpView: View {
         let vectraRight = Double(vectraValueRight) ?? 0
         let vectraLeft = Double(vectraValueLeft) ?? 0
         
-        // 術前Vectra値を取得
-        let preOpVectra = surgery.preOpVectra?.doubleValue ?? 0
+        // ✅ 修正: 術前Vectra値を正しく取得
+        let preOpVectraR = surgery.value(forKey: "preOpVectraR") as? Double ?? 0
+        let preOpVectraL = surgery.value(forKey: "preOpVectraL") as? Double ?? 0
         
-        // 注入量を取得（Core Dataに存在しない場合は計算不可）
-        let injectionVolume: Double = 0 // 仮の値（実際の属性がないため）
+        // ✅ 修正: 注入量を正しく取得
+        let injectionVolumeR = surgery.value(forKey: "injectionVolumeR") as? Double ?? 0
+        let injectionVolumeL = surgery.value(forKey: "injectionVolumeL") as? Double ?? 0
         
-        if preOpVectra > 0 && injectionVolume > 0 {
-            retentionRateRight = ((vectraRight - preOpVectra) / injectionVolume) * 100
-            retentionRateLeft = ((vectraLeft - preOpVectra) / injectionVolume) * 100
+        // 右側定着率
+        if preOpVectraR > 0 && injectionVolumeR > 0 && vectraRight > 0 {
+            retentionRateRight = ((vectraRight - preOpVectraR) / injectionVolumeR) * 100
         } else {
             retentionRateRight = 0
+        }
+        
+        // 左側定着率
+        if preOpVectraL > 0 && injectionVolumeL > 0 && vectraLeft > 0 {
+            retentionRateLeft = ((vectraLeft - preOpVectraL) / injectionVolumeL) * 100
+        } else {
             retentionRateLeft = 0
         }
     }
@@ -234,60 +249,72 @@ struct AddFollowUpView: View {
     
     // MARK: - 保存処理
     private func saveFollowUp() {
+        // バリデーション: 未来の日付チェック
+        if measurementDate > Date() {
+            alertTitle = "入力エラー"
+            alertMessage = "記録日は未来の日付を設定できません"
+            showAlert = true
+            return
+        }
+        
+        // Vectra値のバリデーション
+        if !vectraValueRight.isEmpty {
+            guard let vectraR = Double(vectraValueRight), vectraR >= 0 else {
+                alertTitle = "入力エラー"
+                alertMessage = "Vectra 右の値が不正です"
+                showAlert = true
+                return
+            }
+        }
+        
+        if !vectraValueLeft.isEmpty {
+            guard let vectraL = Double(vectraValueLeft), vectraL >= 0 else {
+                alertTitle = "入力エラー"
+                alertMessage = "Vectra 左の値が不正です"
+                showAlert = true
+                return
+            }
+        }
+        
+        // 体重のバリデーション
+        if !bodyWeight.isEmpty {
+            guard let weight = Double(bodyWeight), weight > 0 else {
+                alertTitle = "入力エラー"
+                alertMessage = "体重の値が不正です"
+                showAlert = true
+                return
+            }
+        }
+        
+        // ✅ 修正: Core Dataエンティティを作成
         let newFollowUp = FollowUp(context: context)
         newFollowUp.id = UUID()
-        newFollowUp.measurementDate = measurementDate  // ✅ 修正: followUpDate → measurementDate
+        newFollowUp.measurementDate = measurementDate
         newFollowUp.surgery = surgery
         
-        // ✅ 追加: Core Data属性に直接保存
+        // ✅ 修正: Core Dataの専用フィールドに直接保存
         newFollowUp.postOpVectraR = vectraValueRight.isEmpty ? nil : NSNumber(value: Double(vectraValueRight)!)
         newFollowUp.postOpVectraL = vectraValueLeft.isEmpty ? nil : NSNumber(value: Double(vectraValueLeft)!)
         newFollowUp.bodyWeight = bodyWeight.isEmpty ? nil : NSNumber(value: Double(bodyWeight)!)
         
-        // ✅ 追加: タイミングを自動設定
-        newFollowUp.timing = "\(dayAfterSurgery)日後"
-        
-        // 備考欄にすべての情報を保存
-        var notesText = ""
-        
-        // 術後日数
-        notesText += "術後日数: \(dayAfterSurgery)日\n"
-        
-        // 豊胸系の場合
-        if isBreastSurgery {
-            if let vectraRight = Double(vectraValueRight), vectraRight > 0 {
-                notesText += "Vectra 右: \(Int(vectraRight)) cc\n"
-            }
-            if let vectraLeft = Double(vectraValueLeft), vectraLeft > 0 {
-                notesText += "Vectra 左: \(Int(vectraLeft)) cc\n"
-            }
-            
-            // 定着率は脂肪注入のみ
-            if isFatInjection {
-                if retentionRateRight > 0 {
-                    notesText += "定着率 右: \(String(format: "%.1f%%", retentionRateRight))\n"
-                }
-                if retentionRateLeft > 0 {
-                    notesText += "定着率 左: \(String(format: "%.1f%%", retentionRateLeft))\n"
-                }
-            }
+        // ✅ 修正: タイミングを自動設定
+        if let surgeryDate = surgery.surgeryDate {
+            let days = Calendar.current.dateComponents([.day], from: surgeryDate, to: measurementDate).day ?? 0
+            newFollowUp.timing = "\(days)日後"
         }
         
-        // 体重（豊胸系・脂肪吸引）
-        if (isBreastSurgery || isLiposuction), let weight = Double(bodyWeight), weight > 0 {
-            notesText += "体重: \(String(format: "%.1f kg", weight))\n"
-        }
+        // ✅ 修正: notesはユーザー入力のメモのみ保存
+        newFollowUp.notes = notes.isEmpty ? nil : notes
         
-        // ユーザー備考
-        if !notes.isEmpty {
-            notesText += "\n【備考】\n\(notes)"
-        }
-        
-        newFollowUp.notes = notesText
-        
+        // Core Dataに保存
         do {
             try context.save()
             print("✅ 経過情報を保存しました")
+            print("   - measurementDate: \(measurementDate)")
+            print("   - postOpVectraR: \(newFollowUp.postOpVectraR?.doubleValue ?? 0)")
+            print("   - postOpVectraL: \(newFollowUp.postOpVectraL?.doubleValue ?? 0)")
+            print("   - bodyWeight: \(newFollowUp.bodyWeight?.doubleValue ?? 0)")
+            print("   - timing: \(newFollowUp.timing ?? "nil")")
             
             alertTitle = "保存完了"
             alertMessage = "経過情報を保存しました。"
@@ -310,14 +337,18 @@ struct AddFollowUpView_Previews: PreviewProvider {
     static var previews: some View {
         let context = PersistenceController.preview.container.viewContext
         
-        // 豊胸系（脂肪注入）の手術
+        // 豊胸系(脂肪注入)の手術
         let fatInjectionSurgery = Surgery(context: context)
         fatInjectionSurgery.id = UUID()
         fatInjectionSurgery.surgeryDate = Date()
         fatInjectionSurgery.surgeryCategory = "豊胸系"
         fatInjectionSurgery.surgeryType = "脂肪注入"
+        fatInjectionSurgery.setValue(250.0, forKey: "injectionVolumeR")
+        fatInjectionSurgery.setValue(250.0, forKey: "injectionVolumeL")
+        fatInjectionSurgery.setValue(200.0, forKey: "preOpVectraR")
+        fatInjectionSurgery.setValue(200.0, forKey: "preOpVectraL")
         
-        // 豊胸系（シリコン）の手術
+        // 豊胸系(シリコン)の手術
         let siliconeSurgery = Surgery(context: context)
         siliconeSurgery.id = UUID()
         siliconeSurgery.surgeryDate = Date()

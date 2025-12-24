@@ -2,6 +2,7 @@
 //  EditLabDataView.swift
 //  CaseFile
 //
+//  Fixed: urea → un に変更
 
 import SwiftUI
 
@@ -31,7 +32,7 @@ struct EditLabDataView: View {
     // MARK: - 生化学系
     @State private var totalProtein: String = ""
     @State private var uricAcid: String = ""
-    @State private var urea: String = ""
+    @State private var un: String = ""  // ✅ 修正: urea → un
     @State private var indirectBilirubin: String = ""
     @State private var creatinine: String = ""
     
@@ -116,7 +117,7 @@ struct EditLabDataView: View {
                 Section(header: Text("生化学系")) {
                     LabValueField(label: "総蛋白(TP)", value: $totalProtein, unit: "g/dL")
                     LabValueField(label: "尿酸(UA)", value: $uricAcid, unit: "mg/dL")
-                    LabValueField(label: "尿素窒素(UN)", value: $urea, unit: "mg/dL")
+                    LabValueField(label: "尿素窒素(UN)", value: $un, unit: "mg/dL")  // ✅ 修正
                     LabValueField(label: "I-BIL", value: $indirectBilirubin, unit: "mg/dL")
                     LabValueField(label: "クレアチニン(CREA)", value: $creatinine, unit: "mg/dL")
                 }
@@ -217,7 +218,7 @@ struct EditLabDataView: View {
         // 生化学系
         totalProtein = labData.totalProtein?.stringValue ?? ""
         uricAcid = labData.uricAcid?.stringValue ?? ""
-        urea = labData.urea?.stringValue ?? ""
+        un = labData.un?.stringValue ?? ""  // ✅ 修正: urea → un
         indirectBilirubin = labData.indirectBilirubin?.stringValue ?? ""
         creatinine = labData.creatinine?.stringValue ?? ""
         
@@ -281,7 +282,7 @@ struct EditLabDataView: View {
         // 生化学系
         labData.totalProtein = totalProtein.isEmpty ? nil : NSNumber(value: Double(totalProtein) ?? 0)
         labData.uricAcid = uricAcid.isEmpty ? nil : NSNumber(value: Double(uricAcid) ?? 0)
-        labData.urea = urea.isEmpty ? nil : NSNumber(value: Double(urea) ?? 0)
+        labData.un = un.isEmpty ? nil : NSNumber(value: Double(un) ?? 0)  // ✅ 修正: urea → un
         labData.indirectBilirubin = indirectBilirubin.isEmpty ? nil : NSNumber(value: Double(indirectBilirubin) ?? 0)
         labData.creatinine = creatinine.isEmpty ? nil : NSNumber(value: Double(creatinine) ?? 0)
         

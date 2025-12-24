@@ -17,17 +17,51 @@ struct FollowUpDetailView: View {
     @State private var showEditView = false
     @State private var showDeleteAlert = false
     @State private var refreshID = UUID()
-    @FocusState private var isFocused: Bool  // ✅ 追加: フォーカス管理
+    @FocusState private var isFocused: Bool
+    
+    // MARK: - 定着率の計算
+    private var retentionRateR: Double? {
+        guard let postOpVectraR = followUp.postOpVectraR?.doubleValue,
+              postOpVectraR > 0 else { return nil }
+        
+        let preOpVectraR = surgery.value(forKey: "preOpVectraR") as? Double ?? 0
+        let injectionVolumeR = surgery.value(forKey: "injectionVolumeR") as? Double ?? 0
+        
+        guard injectionVolumeR > 0 else { return nil }
+        
+        return ((postOpVectraR - preOpVectraR) / injectionVolumeR) * 100
+    }
+    
+    private var retentionRateL: Double? {
+        guard let postOpVectraL = followUp.postOpVectraL?.doubleValue,
+              postOpVectraL > 0 else { return nil }
+        
+        let preOpVectraL = surgery.value(forKey: "preOpVectraL") as? Double ?? 0
+        let injectionVolumeL = surgery.value(forKey: "injectionVolumeL") as? Double ?? 0
+        
+        guard injectionVolumeL > 0 else { return nil }
+        
+        return ((postOpVectraL - preOpVectraL) / injectionVolumeL) * 100
+    }
+    
+    // MARK: - 定着率の色分け
+    private func retentionRateColor(_ rate: Double) -> Color {
+        if rate >= 70 { return .green }
+        if rate >= 50 { return .orange }
+        return .red
+    }
+    
+    private func retentionRateComment(_ rate: Double) -> String {
+        if rate >= 70 { return "良好" }
+        if rate >= 50 { return "標準" }
+        return "要観察"
+    }
     
     // MARK: - リロード処理
     private func reloadFollowUpData() {
-        // Core Dataから最新データを再取得
         viewContext.refresh(followUp, mergeChanges: true)
         viewContext.refresh(surgery, mergeChanges: true)
-        
-        // UIも更新
         refreshID = UUID()
-        
         print("✅ 経過情報データをリロードしました")
     }
     
@@ -70,103 +104,21 @@ struct FollowUpDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     // 基本情報セクション
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("基本情報")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        
-                        Divider()
-                        
-                        // 記録日
-                        HStack {
-                            Text("記録日:")
-                                .frame(width: 100, alignment: .leading)
-                                .foregroundColor(.secondary)
-                            if let date = followUp.measurementDate {
-                                Text(date, style: .date)
-                            } else {
-                                Text("未設定")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        // タイミング
-                        HStack {
-                            Text("タイミング:")
-                                .frame(width: 100, alignment: .leading)
-                                .foregroundColor(.secondary)
-                            Text(followUp.timing ?? "未設定")
-                        }
-                    }
-                    .padding()
-                    .background(Color(NSColor.controlBackgroundColor))
-                    .cornerRadius(8)
+                    basicInfoSection
                     
                     // 測定値セクション(豊胸系のみ)
                     if surgery.surgeryCategory == "豊胸系" {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("測定値")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Divider()
-                            
-                            // 右側測定値
-                            HStack {
-                                Text("Vectra R:")
-                                    .frame(width: 100, alignment: .leading)
-                                    .foregroundColor(.secondary)
-                                if let vectraR = followUp.postOpVectraR?.doubleValue, vectraR > 0 {
-                                    Text(String(format: "%.1f cc", vectraR))
-                                } else {
-                                    Text("未測定")
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            // 左側測定値
-                            HStack {
-                                Text("Vectra L:")
-                                    .frame(width: 100, alignment: .leading)
-                                    .foregroundColor(.secondary)
-                                if let vectraL = followUp.postOpVectraL?.doubleValue, vectraL > 0 {
-                                    Text(String(format: "%.1f cc", vectraL))
-                                } else {
-                                    Text("未測定")
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            // 体重
-                            if let weight = followUp.bodyWeight?.doubleValue, weight > 0 {
-                                HStack {
-                                    Text("体重:")
-                                        .frame(width: 100, alignment: .leading)
-                                        .foregroundColor(.secondary)
-                                    Text(String(format: "%.1f kg", weight))
-                                }
-                            }
-                        }
-                        .padding()
-                        .background(Color(NSColor.controlBackgroundColor))
-                        .cornerRadius(8)
+                        measurementsSection
+                    }
+                    
+                    // 定着率セクション(豊胸系かつ脂肪注入のみ)
+                    if shouldShowRetentionRate {
+                        retentionRateSection
                     }
                     
                     // メモセクション
                     if let notes = followUp.notes, !notes.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("メモ")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Divider()
-                            
-                            Text(notes)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .padding()
-                        .background(Color(NSColor.controlBackgroundColor))
-                        .cornerRadius(8)
+                        notesSection(notes: notes)
                     }
                     
                     Spacer()
@@ -177,19 +129,18 @@ struct FollowUpDetailView: View {
         .id(refreshID)
         .frame(minWidth: 700, idealWidth: 800, maxWidth: 1000,
                minHeight: 600, idealHeight: 700, maxHeight: 900)
-        .focusable()  // ✅ 追加: キーボードイベントを受け取れるようにする
-        .focused($isFocused)  // ✅ 追加: フォーカス管理
+        .focusable()
+        .focused($isFocused)
         .onAppear {
-            isFocused = true  // ✅ 追加: 表示時に自動フォーカス
+            isFocused = true
         }
-        .onKeyPress(characters: .alphanumerics) { press in  // ✅ 修正
+        .onKeyPress(characters: .alphanumerics) { press in
             if press.characters == "r" || press.characters == "R" {
                 reloadFollowUpData()
                 return .handled
             }
             return .ignored
         }
-
         .sheet(isPresented: $showEditView) {
             EditFollowUpView(followUp: followUp, surgery: surgery)
                 .environment(\.managedObjectContext, viewContext)
@@ -204,6 +155,174 @@ struct FollowUpDetailView: View {
         }
     }
     
+    // MARK: - 基本情報セクション
+    private var basicInfoSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("基本情報")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Divider()
+            
+            // 記録日
+            HStack {
+                Text("記録日:")
+                    .frame(width: 100, alignment: .leading)
+                    .foregroundColor(.secondary)
+                if let date = followUp.measurementDate {
+                    Text(date, style: .date)
+                } else {
+                    Text("未設定")
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // タイミング
+            HStack {
+                Text("タイミング:")
+                    .frame(width: 100, alignment: .leading)
+                    .foregroundColor(.secondary)
+                Text(followUp.timing ?? "未設定")
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    // MARK: - 測定値セクション
+    private var measurementsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("測定値")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Divider()
+            
+            // 右側測定値
+            HStack {
+                Text("Vectra R:")
+                    .frame(width: 100, alignment: .leading)
+                    .foregroundColor(.secondary)
+                if let vectraR = followUp.postOpVectraR?.doubleValue, vectraR > 0 {
+                    Text(String(format: "%.1f cc", vectraR))
+                } else {
+                    Text("未測定")
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // 左側測定値
+            HStack {
+                Text("Vectra L:")
+                    .frame(width: 100, alignment: .leading)
+                    .foregroundColor(.secondary)
+                if let vectraL = followUp.postOpVectraL?.doubleValue, vectraL > 0 {
+                    Text(String(format: "%.1f cc", vectraL))
+                } else {
+                    Text("未測定")
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // 体重
+            if let weight = followUp.bodyWeight?.doubleValue, weight > 0 {
+                HStack {
+                    Text("体重:")
+                        .frame(width: 100, alignment: .leading)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.1f kg", weight))
+                }
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    // MARK: - 定着率セクション
+    private var retentionRateSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("定着率(自動計算)")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 16) {
+                // 右側定着率
+                if let rateR = retentionRateR {
+                    retentionRateRow(side: "右", rate: rateR)
+                }
+                
+                if retentionRateR != nil && retentionRateL != nil {
+                    Divider()
+                }
+                
+                // 左側定着率
+                if let rateL = retentionRateL {
+                    retentionRateRow(side: "左", rate: rateL)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    // MARK: - 定着率表示行
+    private func retentionRateRow(side: String, rate: Double) -> some View {
+        HStack {
+            Text(side)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 40, alignment: .leading)
+            
+            Text(String(format: "%.1f%%", rate))
+                .font(.title3)
+                .bold()
+                .foregroundColor(retentionRateColor(rate))
+            
+            Spacer()
+            
+            Text(retentionRateComment(rate))
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(retentionRateColor(rate).opacity(0.2))
+                .cornerRadius(4)
+        }
+    }
+    
+    // MARK: - メモセクション
+    private func notesSection(notes: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("メモ")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Divider()
+            
+            Text(notes)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    // MARK: - 条件判定
+    private var shouldShowRetentionRate: Bool {
+        // 豊胸系かつ脂肪注入の場合のみ定着率を表示
+        let isFatInjection = surgery.surgeryCategory == "豊胸系" && 
+                            (surgery.surgeryType?.contains("脂肪注入") ?? false)
+        
+        return isFatInjection && (retentionRateR != nil || retentionRateL != nil)
+    }
+    
+    // MARK: - 削除処理
     private func deleteFollowUp() {
         viewContext.delete(followUp)
         
@@ -222,14 +341,19 @@ struct FollowUpDetailView_Previews: PreviewProvider {
         
         let surgery = Surgery(context: context)
         surgery.surgeryCategory = "豊胸系"
+        surgery.surgeryType = "脂肪注入"
+        surgery.setValue(250.0, forKey: "injectionVolumeR")
+        surgery.setValue(250.0, forKey: "injectionVolumeL")
+        surgery.setValue(200.0, forKey: "preOpVectraR")
+        surgery.setValue(200.0, forKey: "preOpVectraL")
         
         let followUp = FollowUp(context: context)
         followUp.id = UUID()
         followUp.measurementDate = Date()
         followUp.timing = "1ヶ月後"
         followUp.notes = "順調に回復しています"
-        followUp.postOpVectraR = NSNumber(value: 250.0)
-        followUp.postOpVectraL = NSNumber(value: 245.0)
+        followUp.postOpVectraR = NSNumber(value: 350.0)
+        followUp.postOpVectraL = NSNumber(value: 345.0)
         followUp.bodyWeight = NSNumber(value: 52.5)
         followUp.surgery = surgery
         

@@ -1,9 +1,10 @@
 //  SurgeryDetailView.swift
 //  CaseFile
 //
-//  手術詳細画面（タブ表示: 手術情報・写真管理・経過情報）
+//  手術詳細画面(タブ表示: 手術情報・写真管理・経過情報)
 //  Phase 3改善版: 全属性の完全表示対応 + ツールバー修正 + 脂肪吸引部位表示修正 + Rキーリロード対応
-//
+//  ✅ VECTRAデータ表示対応: カテゴリ名部分一致に修正
+//  ✅ 2025-12-24: procedure(脂肪注入種別)フィールド表示追加
 
 import SwiftUI
 import CoreData
@@ -44,7 +45,7 @@ struct SurgeryDetailView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // カスタムヘッダー（ツールバーの代わり）
+                // カスタムヘッダー(ツールバーの代わり)
                 customHeader
                 
                 Divider()
@@ -88,7 +89,7 @@ struct SurgeryDetailView: View {
                     deleteSurgery()
                 }
             } message: {
-                Text("この手術と関連する全てのデータ（写真、経過情報）が削除されます。この操作は取り消せません。")
+                Text("この手術と関連する全てのデータ(写真、経過情報)が削除されます。この操作は取り消せません。")
             }
         }
         .frame(minWidth: 900, idealWidth: 1000, minHeight: 750)
@@ -157,8 +158,8 @@ struct SurgeryDetailView: View {
                 
                 Divider()
                 
-                // 患者情報（豊胸系のみ）
-                if surgery.surgeryCategory == "豊胸系" {
+                // ✅ 修正1: 患者情報(豊胸系のみ) - contains で部分一致判定
+                if surgery.surgeryCategory?.contains("豊胸") == true {
                     patientInfoSection
                     Divider()
                 }
@@ -169,8 +170,8 @@ struct SurgeryDetailView: View {
                     Divider()
                 }
                 
-                // 術前測定値（豊胸系のみ）
-                if surgery.surgeryCategory == "豊胸系" {
+                // ✅ 修正2: 術前測定値(豊胸系のみ) - contains で部分一致判定
+                if surgery.surgeryCategory?.contains("豊胸") == true {
                     preOpMeasurementsSection
                     Divider()
                 }
@@ -201,6 +202,10 @@ struct SurgeryDetailView: View {
                 }
                 InfoRow(label: "カテゴリ", value: surgery.surgeryCategory ?? "未設定", labelWidth: 180)
                 InfoRow(label: "術式", value: surgery.surgeryType ?? "未設定", labelWidth: 180)
+                // ✅ 追加: 脂肪注入種別の表示
+                if let procedure = surgery.procedure, !procedure.isEmpty {
+                    InfoRow(label: "種類", value: procedure, labelWidth: 180)
+                }
             }
             .padding()
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
@@ -208,10 +213,10 @@ struct SurgeryDetailView: View {
         }
     }
     
-    // MARK: - 患者情報セクション（豊胸系のみ）
+    // MARK: - 患者情報セクション(豊胸系のみ)
     private var patientInfoSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("患者情報（豊胸系）")
+            Text("患者情報(豊胸系)")
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -250,7 +255,7 @@ struct SurgeryDetailView: View {
         }
     }
     
-    // MARK: - 術前測定値セクション（豊胸系のみ）
+    // MARK: - 術前測定値セクション(豊胸系のみ)
     private var preOpMeasurementsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("術前測定値")
@@ -309,7 +314,8 @@ struct SurgeryDetailView: View {
     // MARK: - カテゴリー別詳細セクション
     private var categorySpecificSection: some View {
         Group {
-            if surgery.surgeryCategory == "豊胸系" {
+            // ✅ 修正3: contains で部分一致判定
+            if surgery.surgeryCategory?.contains("豊胸") == true {
                 if let surgeryType = surgery.surgeryType, surgeryType.contains("脂肪注入") {
                     fatInjectionSection
                 } else if let surgeryType = surgery.surgeryType, surgeryType.contains("シリコン") {
@@ -329,6 +335,11 @@ struct SurgeryDetailView: View {
                 .fontWeight(.bold)
             
             VStack(spacing: 12) {
+                // ✅ 追加: 脂肪注入種別
+                if let procedure = surgery.procedure, !procedure.isEmpty {
+                    InfoRow(label: "種類", value: procedure, labelWidth: 180)
+                }
+                
                 // ドナー部位
                 InfoRow(label: "ドナー部位", value: surgery.donorSite ?? "未入力", labelWidth: 180)
                 if surgery.donorSite == "その他", let other = surgery.donorSiteOther {
@@ -416,7 +427,7 @@ struct SurgeryDetailView: View {
         }
     }
     
-    // MARK: - 脂肪吸引詳細（修正版）
+    // MARK: - 脂肪吸引詳細(修正版)
     private var liposuctionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("脂肪吸引詳細")

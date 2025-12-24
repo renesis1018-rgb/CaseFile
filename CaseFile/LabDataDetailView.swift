@@ -184,7 +184,7 @@ struct LabDataDetailView: View {
                 if let value = labData.uricAcid {
                     LabDataInfoRow(label: "尿酸 (UA)", value: value, unit: "mg/dL")
                 }
-                if let value = labData.urea {
+                if let value = labData.un {
                     LabDataInfoRow(label: "尿素窒素 (UN)", value: value, unit: "mg/dL")
                 }
                 if let value = labData.indirectBilirubin {
