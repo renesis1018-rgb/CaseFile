@@ -31,104 +31,110 @@ class CSVImporterManager: ObservableObject {
     }
     
     private func importExcel(from url: URL) {
-        do {
-            guard let file = XLSXFile(filepath: url.path) else {
-                DispatchQueue.main.async {
-                    self.importResult = "❌ Cannot open Excel file"
-                    self.errorMessages.append("Cannot open Excel file")
-                }
-                return
-            }
-            
-            // SharedStrings の読み込み
-            let sharedStrings = try file.parseSharedStrings()
-            print("✅ SharedStrings loaded: \(sharedStrings?.uniqueCount ?? 0) items")
-            
-            // ワークシートパスを取得
-            let worksheetPaths = try file.parseWorksheetPaths()
-            print("✅ Worksheet count: \(worksheetPaths.count)")
-            
-            // 各シートの種類を判定
-            var patientsSheet: String?
-            var surgeriesSheet: String?
-            var labDataSheet: String?
-            var followUpsSheet: String?
-            
-            for path in worksheetPaths {
-                let worksheet = try file.parseWorksheet(at: path)
-                
-                // 1行目のヘッダーを確認
-                let firstRow = worksheet.data?.rows.first
-                if let cells = firstRow?.cells {
-                    let headers = cells.compactMap { cell -> String? in
-                        guard let sharedStrings = sharedStrings else { return nil }
-                        return cell.stringValue(sharedStrings)
-                    }
-                    
-                    print("📋 Sheet \(path) headers: \(headers.prefix(5))")
-                    
-                    // ヘッダーで判定
-                    if headers.contains("患者ID") && headers.contains("年齢") && headers.contains("登録日") {
-                        patientsSheet = path
-                        print("📋 Patients sheet found: \(path)")
-                    } else if headers.contains("術式") && headers.contains("手術日") && headers.contains("手術カテゴリ") {
-                        surgeriesSheet = path
-                        print("📋 Surgeries sheet found: \(path)")
-                    } else if headers.contains("検査日") && headers.contains("白血球数(WBC)") {
-                        labDataSheet = path
-                        print("📋 LabData sheet found: \(path)")
-                    } else if headers.contains("フォローアップ日") && headers.contains("VECTRA体積(R)") {
-                        followUpsSheet = path
-                        print("📋 FollowUps sheet found: \(path)")
-                    }
-                }
-            }
-            
-            // 正しい順序で処理
-            var stats = [String: Int]()
-            
-            if let path = patientsSheet {
-                stats["Patients"] = try importPatients(from: file, path: path, sharedStrings: sharedStrings)
-            }
-            
-            if let path = surgeriesSheet {
-                stats["Surgeries"] = try importSurgeries(from: file, path: path, sharedStrings: sharedStrings)
-            }
-            
-            if let path = labDataSheet {
-                stats["LabData"] = try importLabData(from: file, path: path, sharedStrings: sharedStrings)
-            }
-            
-            if let path = followUpsSheet {
-                stats["FollowUps"] = try importFollowUps(from: file, path: path, sharedStrings: sharedStrings)
-            }
-            
-            // ✅ 追加: すべてのインポートが完了した後に一度だけ保存
+        // ✅ 修正: Background Context を作成
+        let backgroundContext = PersistenceController.shared.container.newBackgroundContext()
+        backgroundContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        
+        backgroundContext.performAndWait {
             do {
-                try viewContext.save()
-                print("✅ All data saved successfully")
-            } catch {
-                print("❌ Final save error: \(error)")
-                throw error
-            }
-            
-            // 結果をメインスレッドで更新
-            DispatchQueue.main.async {
-                self.importedCounts = stats
-                
-                var result = "インポート結果:\n"
-                for (key, value) in stats.sorted(by: { $0.key < $1.key }) {
-                    result += "\(key): \(value)件\n"
+                guard let file = XLSXFile(filepath: url.path) else {
+                    DispatchQueue.main.async {
+                        self.importResult = "❌ Cannot open Excel file"
+                        self.errorMessages.append("Cannot open Excel file")
+                    }
+                    return
                 }
-                self.importResult = result
+                
+                // SharedStrings の読み込み
+                let sharedStrings = try file.parseSharedStrings()
+                print("✅ SharedStrings loaded: \(sharedStrings?.uniqueCount ?? 0) items")
+                
+                // ワークシートパスを取得
+                let worksheetPaths = try file.parseWorksheetPaths()
+                print("✅ Worksheet count: \(worksheetPaths.count)")
+                
+                // 各シートの種類を判定
+                var patientsSheet: String?
+                var surgeriesSheet: String?
+                var labDataSheet: String?
+                var followUpsSheet: String?
+                
+                for path in worksheetPaths {
+                    let worksheet = try file.parseWorksheet(at: path)
+                    
+                    // 1行目のヘッダーを確認
+                    let firstRow = worksheet.data?.rows.first
+                    if let cells = firstRow?.cells {
+                        let headers = cells.compactMap { cell -> String? in
+                            guard let sharedStrings = sharedStrings else { return nil }
+                            return cell.stringValue(sharedStrings)
+                        }
+                        
+                        print("📋 Sheet \(path) headers: \(headers.prefix(5))")
+                        
+                        // ヘッダーで判定
+                        if headers.contains("患者ID") && headers.contains("年齢") && headers.contains("登録日") {
+                            patientsSheet = path
+                            print("📋 Patients sheet found: \(path)")
+                        } else if headers.contains("術式") && headers.contains("手術日") && headers.contains("手術カテゴリ") {
+                            surgeriesSheet = path
+                            print("📋 Surgeries sheet found: \(path)")
+                        } else if headers.contains("検査日") && headers.contains("白血球数(WBC)") {
+                            labDataSheet = path
+                            print("📋 LabData sheet found: \(path)")
+                        } else if headers.contains("フォローアップ日") && headers.contains("VECTRA体積(R)") {
+                            followUpsSheet = path
+                            print("📋 FollowUps sheet found: \(path)")
+                        }
+                    }
+                }
+                
+                // 正しい順序で処理（backgroundContext を使用）
+                var stats = [String: Int]()
+                
+                if let path = patientsSheet {
+                    stats["Patients"] = try self.importPatients(from: file, path: path, sharedStrings: sharedStrings, context: backgroundContext)
+                }
+                
+                if let path = surgeriesSheet {
+                    stats["Surgeries"] = try self.importSurgeries(from: file, path: path, sharedStrings: sharedStrings, context: backgroundContext)
+                }
+                
+                if let path = labDataSheet {
+                    stats["LabData"] = try self.importLabData(from: file, path: path, sharedStrings: sharedStrings, context: backgroundContext)
+                }
+                
+                if let path = followUpsSheet {
+                    stats["FollowUps"] = try self.importFollowUps(from: file, path: path, sharedStrings: sharedStrings, context: backgroundContext)
+                }
+                
+                // ✅ 修正: Background Context で保存
+                do {
+                    try backgroundContext.save()
+                    print("✅ All data saved successfully in background context")
+                } catch {
+                    print("❌ Final save error: \(error)")
+                    throw error
+                }
+                
+                // 結果をメインスレッドで更新
+                DispatchQueue.main.async {
+                    self.importedCounts = stats
+                    
+                    var result = "インポート結果:\n"
+                    for (key, value) in stats.sorted(by: { $0.key < $1.key }) {
+                        result += "\(key): \(value)件\n"
+                    }
+                    self.importResult = result
+                }
+                
+            } catch {
+                DispatchQueue.main.async {
+                    self.importResult = "❌ Excel import error: \(error.localizedDescription)"
+                    self.errorMessages.append("Excel import error: \(error.localizedDescription)")
+                }
+                print("❌ Excel import error: \(error)")
             }
-            
-        } catch {
-            DispatchQueue.main.async {
-                self.importResult = "❌ Excel import error: \(error.localizedDescription)"
-                self.errorMessages.append("Excel import error: \(error.localizedDescription)")
-            }
-            print("❌ Excel import error: \(error)")
         }
     }
     
@@ -174,7 +180,7 @@ class CSVImporterManager: ObservableObject {
     }
     
     // MARK: - Import Patients
-    private func importPatients(from file: XLSXFile, path: String, sharedStrings: SharedStrings?) throws -> Int {
+    private func importPatients(from file: XLSXFile, path: String, sharedStrings: SharedStrings?, context: NSManagedObjectContext) throws -> Int {
         print("📄 Processing Patients: \(path)")
         
         let worksheet = try file.parseWorksheet(at: path)
@@ -202,8 +208,8 @@ class CSVImporterManager: ObservableObject {
             let fetchRequest: NSFetchRequest<Patient> = Patient.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "patientId == %@", patientId)
             
-            let existingPatients = try viewContext.fetch(fetchRequest)
-            let patient = existingPatients.first ?? Patient(context: viewContext)
+            let existingPatients = try context.fetch(fetchRequest)
+            let patient = existingPatients.first ?? Patient(context: context)
             
             patient.patientId = patientId
             
@@ -234,13 +240,12 @@ class CSVImporterManager: ObservableObject {
             count += 1
         }
         
-        // ✅ 修正: 個別保存を削除(最後にまとめて保存)
         print("✅ Patients created: \(count)")
         return count
     }
     
     // MARK: - Import Surgeries
-    private func importSurgeries(from file: XLSXFile, path: String, sharedStrings: SharedStrings?) throws -> Int {
+    private func importSurgeries(from file: XLSXFile, path: String, sharedStrings: SharedStrings?, context: NSManagedObjectContext) throws -> Int {
         print("📄 Processing Surgeries: \(path)")
         
         let worksheet = try file.parseWorksheet(at: path)
@@ -268,12 +273,12 @@ class CSVImporterManager: ObservableObject {
             let fetchRequest: NSFetchRequest<Patient> = Patient.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "patientId == %@", patientId)
             
-            guard let patient = try viewContext.fetch(fetchRequest).first else {
+            guard let patient = try context.fetch(fetchRequest).first else {
                 print("⚠️ Patient not found: \(patientId)")
                 continue
             }
             
-            let surgery = Surgery(context: viewContext)
+            let surgery = Surgery(context: context)
             surgery.id = UUID()
             surgery.patient = patient
             
@@ -413,13 +418,12 @@ class CSVImporterManager: ObservableObject {
             count += 1
         }
         
-        // ✅ 修正: 個別保存を削除(最後にまとめて保存)
         print("✅ Surgeries created: \(count)")
         return count
     }
     
     // MARK: - Import LabData
-    private func importLabData(from file: XLSXFile, path: String, sharedStrings: SharedStrings?) throws -> Int {
+    private func importLabData(from file: XLSXFile, path: String, sharedStrings: SharedStrings?, context: NSManagedObjectContext) throws -> Int {
         print("📄 Processing LabData: \(path)")
         
         let worksheet = try file.parseWorksheet(at: path)
@@ -447,12 +451,12 @@ class CSVImporterManager: ObservableObject {
             let fetchRequest: NSFetchRequest<Patient> = Patient.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "patientId == %@", patientId)
             
-            guard let patient = try viewContext.fetch(fetchRequest).first else {
+            guard let patient = try context.fetch(fetchRequest).first else {
                 print("⚠️ Patient not found: \(patientId)")
                 continue
             }
             
-            let labData = LabData(context: viewContext)
+            let labData = LabData(context: context)
             labData.id = UUID()  // 必須フィールド
             labData.patient = patient
             
@@ -528,13 +532,12 @@ class CSVImporterManager: ObservableObject {
             count += 1
         }
         
-        // ✅ 修正: 個別保存を削除(最後にまとめて保存)
         print("✅ LabData created: \(count)")
         return count
     }
     
     // MARK: - Import FollowUps
-    private func importFollowUps(from file: XLSXFile, path: String, sharedStrings: SharedStrings?) throws -> Int {
+    private func importFollowUps(from file: XLSXFile, path: String, sharedStrings: SharedStrings?, context: NSManagedObjectContext) throws -> Int {
         print("📄 Processing FollowUps: \(path)")
         
         let worksheet = try file.parseWorksheet(at: path)
@@ -575,7 +578,7 @@ class CSVImporterManager: ObservableObject {
             let patientFetch: NSFetchRequest<Patient> = Patient.fetchRequest()
             patientFetch.predicate = NSPredicate(format: "patientId == %@", patientId)
             
-            guard let patient = try viewContext.fetch(patientFetch).first else {
+            guard let patient = try context.fetch(patientFetch).first else {
                 print("⚠️ Patient not found: \(patientId)")
                 continue
             }
@@ -583,14 +586,14 @@ class CSVImporterManager: ObservableObject {
             let surgeryFetch: NSFetchRequest<Surgery> = Surgery.fetchRequest()
             surgeryFetch.predicate = NSPredicate(format: "patient == %@ AND surgeryDate == %@", patient, surgeryDate as NSDate)
             
-            guard let surgery = try viewContext.fetch(surgeryFetch).first else {
+            guard let surgery = try context.fetch(surgeryFetch).first else {
                 let dateFormatter = DateFormatter()
                 dateFormatter.dateFormat = "yyyy-MM-dd"
                 print("⚠️ Surgery not found for patient \(patientId) on \(dateFormatter.string(from: surgeryDate))")
                 continue
             }
             
-            let followUp = FollowUp(context: viewContext)
+            let followUp = FollowUp(context: context)
             followUp.id = UUID()  // OptionalだがUUIDを設定
             followUp.surgery = surgery
             followUp.followUpDate = followUpDateFromCell
@@ -598,15 +601,15 @@ class CSVImporterManager: ObservableObject {
             followUp.timing = cellMap[4]
             
             // ✅ 修正: 正しいフィールド名に変更
-            if let vectraRStr = cellMap[5], let value = Double(vectraRStr) { 
+            if let vectraRStr = cellMap[5], let value = Double(vectraRStr) {
                 followUp.postOpVectraR = NSNumber(value: value)
                 print("  - postOpVectraR: \(value)")
             }
-            if let vectraLStr = cellMap[6], let value = Double(vectraLStr) { 
+            if let vectraLStr = cellMap[6], let value = Double(vectraLStr) {
                 followUp.postOpVectraL = NSNumber(value: value)
                 print("  - postOpVectraL: \(value)")
             }
-            if let bwStr = cellMap[9], let value = Double(bwStr) { 
+            if let bwStr = cellMap[9], let value = Double(bwStr) {
                 followUp.bodyWeight = NSNumber(value: value)
                 print("  - bodyWeight: \(value)")
             }
@@ -616,7 +619,6 @@ class CSVImporterManager: ObservableObject {
             count += 1
         }
         
-        // ✅ 修正: 個別保存を削除(最後にまとめて保存)
         print("✅ FollowUps created: \(count)")
         return count
     }
