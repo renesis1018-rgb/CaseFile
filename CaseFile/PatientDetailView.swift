@@ -4,6 +4,7 @@
 //
 //  患者詳細画面(手術履歴一覧) + 手術カード詳細表示対応
 //  ✅ 2025-12-24: procedureフィールド表示対応追加
+//  ✅ 2025-12-25: 血液検査コピペインポート機能追加
 //
 
 import SwiftUI
@@ -16,6 +17,7 @@ struct PatientDetailView: View {
     @State private var showEditPatient = false
     @State private var showAddSurgery = false
     @State private var showAddLabData = false
+    @State private var showQuickLabDataImport = false  // ✅ 追加
     @State private var showDeleteConfirm = false
     @State private var selectedSurgery: Surgery?
     @State private var showSurgeryDetail = false
@@ -117,6 +119,11 @@ struct PatientDetailView: View {
         }
         .sheet(isPresented: $showAddLabData) {
             AddLabDataView(patient: patient, context: viewContext)
+        }
+        // ✅ 追加: クイックインポート用シート
+        .sheet(isPresented: $showQuickLabDataImport) {
+            QuickLabDataImportView(patient: patient)
+                .environment(\.managedObjectContext, viewContext)
         }
         .sheet(isPresented: $showSurgeryDetail) {
             if let surgery = selectedSurgery {
@@ -258,12 +265,23 @@ struct PatientDetailView: View {
                 
                 Spacer()
                 
-                Button(action: { showAddLabData = true }) {
-                    Label("血液検査登録", systemImage: "plus")
-                        .font(.system(size: 13))
+                // ✅ 修正: ボタンを2つに分割
+                HStack(spacing: 8) {
+                    Button(action: { showAddLabData = true }) {
+                        Label("手動入力", systemImage: "plus")
+                            .font(.system(size: 13))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    
+                    // ✅ 追加: コピペインポートボタン
+                    Button(action: { showQuickLabDataImport = true }) {
+                        Label("コピペインポート", systemImage: "doc.on.clipboard")
+                            .font(.system(size: 13))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
             }
             
             if labData.isEmpty {
