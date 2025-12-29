@@ -5,6 +5,7 @@
 //  患者詳細画面(手術履歴一覧) + 手術カード詳細表示対応
 //  ✅ 2025-12-24: procedureフィールド表示対応追加
 //  ✅ 2025-12-25: 血液検査コピペインポート機能追加
+//  ✅ 2025-12-29: 血液検査編集・削除機能追加
 //
 
 import SwiftUI
@@ -17,10 +18,17 @@ struct PatientDetailView: View {
     @State private var showEditPatient = false
     @State private var showAddSurgery = false
     @State private var showAddLabData = false
-    @State private var showQuickLabDataImport = false  // ✅ 追加
+    @State private var showQuickLabDataImport = false
     @State private var showDeleteConfirm = false
     @State private var selectedSurgery: Surgery?
     @State private var showSurgeryDetail = false
+    
+    // ✅ 追加: 血液検査編集・削除用
+    @State private var showEditLabData = false
+    @State private var showLabDataDetail = false
+    @State private var selectedLabData: LabData?
+    @State private var showLabDataDeleteConfirm = false
+    @State private var labDataToDelete: LabData?
     
     // ✅ 追加: リフレッシュ用
     @State private var refreshID = UUID()
@@ -80,10 +88,9 @@ struct PatientDetailView: View {
             }
             .padding()
         }
-        .id(refreshID)  // ✅ 追加: リフレッシュ時にViewを再生成
+        .id(refreshID)
         .navigationTitle(patient.patientId ?? "患者詳細")
         .toolbar {
-            // ✅ 修正: リロードボタン + Rキーショートカット
             ToolbarItem(placement: .automatic) {
                 Button(action: {
                     reloadPatientData()
@@ -118,12 +125,27 @@ struct PatientDetailView: View {
             AddSurgeryView(patient: patient, context: viewContext)
         }
         .sheet(isPresented: $showAddLabData) {
-            AddLabDataView(patient: patient, context: viewContext)
+            AddLabDataView(patient: patient, context: viewContext, surgery: nil)
         }
-        // ✅ 追加: クイックインポート用シート
         .sheet(isPresented: $showQuickLabDataImport) {
             QuickLabDataImportView(patient: patient)
                 .environment(\.managedObjectContext, viewContext)
+        }
+        // ✅ 追加: 血液検査編集用シート
+        .sheet(isPresented: $showEditLabData) {
+            if let labData = selectedLabData {
+                EditLabDataView(labData: labData)
+                    .environment(\.managedObjectContext, viewContext)
+                    .frame(minWidth: 1000, idealWidth: 1200, minHeight: 750, idealHeight: 850)
+            }
+        }
+        // ✅ 追加: 血液検査詳細用シート
+        .sheet(isPresented: $showLabDataDetail) {
+            if let labData = selectedLabData {
+                LabDataDetailView(labData: labData)
+                    .environment(\.managedObjectContext, viewContext)
+                    .frame(minWidth: 900, idealWidth: 1100, minHeight: 700, idealHeight: 800)
+            }
         }
         .sheet(isPresented: $showSurgeryDetail) {
             if let surgery = selectedSurgery {
@@ -139,6 +161,17 @@ struct PatientDetailView: View {
             }
         } message: {
             Text("この患者と関連する全てのデータ(手術、写真、経過情報)が削除されます。この操作は取り消せません。")
+        }
+        // ✅ 追加: 血液検査削除確認ダイアログ
+        .alert("血液検査データの削除", isPresented: $showLabDataDeleteConfirm) {
+            Button("キャンセル", role: .cancel) {}
+            Button("削除", role: .destructive) {
+                if let labData = labDataToDelete {
+                    deleteLabData(labData)
+                }
+            }
+        } message: {
+            Text("この血液検査データを削除してもよろしいですか？この操作は取り消せません。")
         }
     }
     
@@ -265,7 +298,6 @@ struct PatientDetailView: View {
                 
                 Spacer()
                 
-                // ✅ 修正: ボタンを2つに分割
                 HStack(spacing: 8) {
                     Button(action: { showAddLabData = true }) {
                         Label("手動入力", systemImage: "plus")
@@ -274,7 +306,6 @@ struct PatientDetailView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     
-                    // ✅ 追加: コピペインポートボタン
                     Button(action: { showQuickLabDataImport = true }) {
                         Label("コピペインポート", systemImage: "doc.on.clipboard")
                             .font(.system(size: 13))
@@ -299,10 +330,21 @@ struct PatientDetailView: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(labData, id: \.objectID) { lab in
-                        NavigationLink(destination: LabDataDetailView(labData: lab)) {
-                            LabDataRowView(labData: lab)
-                        }
-                        .buttonStyle(.plain)
+                        LabDataRowView(
+                            labData: lab,
+                            onDetail: {
+                                selectedLabData = lab
+                                showLabDataDetail = true
+                            },
+                            onEdit: {
+                                selectedLabData = lab
+                                showEditLabData = true
+                            },
+                            onDelete: {
+                                labDataToDelete = lab
+                                showLabDataDeleteConfirm = true
+                            }
+                        )
                     }
                 }
             }
@@ -321,6 +363,18 @@ struct PatientDetailView: View {
         }
     }
     
+    // ✅ 追加: 血液検査削除処理
+    private func deleteLabData(_ labData: LabData) {
+        viewContext.delete(labData)
+        
+        do {
+            try viewContext.save()
+            reloadPatientData()
+        } catch {
+            print("⚠️ 血液検査削除エラー: \(error)")
+        }
+    }
+    
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -330,7 +384,7 @@ struct PatientDetailView: View {
     }
 }
 
-// MARK: - Surgery Row View (✅ 修正: procedureフィールド対応)
+// MARK: - Surgery Row View
 
 struct SurgeryRowView: View {
     let surgery: Surgery
@@ -358,7 +412,6 @@ struct SurgeryRowView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                // ✅ 修正: 詳細情報(procedureフィールド対応)
                 if let detailInfo = surgeryDetailInfo {
                     Text(detailInfo)
                         .font(.system(size: 11))
@@ -378,19 +431,15 @@ struct SurgeryRowView: View {
         .cornerRadius(8)
     }
     
-    // ✅ 修正: 手術詳細情報の取得(procedureフィールド優先)
     private var surgeryDetailInfo: String? {
         let category = surgery.surgeryCategory ?? ""
         let type = surgery.surgeryType ?? ""
         
-        // 豊胸系 - 脂肪注入
         if category.contains("豊胸") && type.contains("脂肪注入") {
-            // ✅ 優先順位1: procedureフィールドを確認
             if let procedure = surgery.procedure, !procedure.isEmpty {
                 return "種類: \(procedure)"
             }
             
-            // ✅ 優先順位2: notesから種別を抽出(手入力時の互換性)
             if let notes = surgery.notes, notes.contains("【種別】") {
                 let components = notes.components(separatedBy: "【種別】")
                 if components.count > 1 {
@@ -401,7 +450,6 @@ struct SurgeryRowView: View {
             return nil
         }
         
-        // 豊胸系 - シリコン
         if category.contains("豊胸") && type.contains("シリコン") {
             if let manufacturer = surgery.implantManufacturer, !manufacturer.isEmpty {
                 return "メーカー: \(manufacturer)"
@@ -409,7 +457,6 @@ struct SurgeryRowView: View {
             return nil
         }
         
-        // 脂肪吸引
         if category.contains("脂肪吸引") {
             if let donorSite = surgery.donorSite, !donorSite.isEmpty {
                 return "部位: \(donorSite)"
@@ -437,10 +484,13 @@ struct SurgeryRowView: View {
     }
 }
 
-// MARK: - Lab Data Row View
+// MARK: - Lab Data Row View (✅ 修正: 編集・削除ボタン追加)
 
 struct LabDataRowView: View {
     let labData: LabData
+    let onDetail: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
     
     var body: some View {
         HStack {
@@ -457,9 +507,32 @@ struct LabDataRowView: View {
             
             Spacer()
             
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+            // ✅ 修正: 詳細・編集・削除ボタン
+            HStack(spacing: 8) {
+                Button(action: onDetail) {
+                    Image(systemName: "eye.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(.plain)
+                .help("詳細表示")
+                
+                Button(action: onEdit) {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.orange)
+                }
+                .buttonStyle(.plain)
+                .help("編集")
+                
+                Button(action: onDelete) {
+                    Image(systemName: "trash.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+                .help("削除")
+            }
         }
         .padding()
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
