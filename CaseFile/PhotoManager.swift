@@ -68,14 +68,15 @@ class PhotoManager {
         return bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.7])
     }
     
-    // 写真を保存
+    // 写真を保存（部位情報対応版）
     func savePhoto(
         context: NSManagedObjectContext,
         surgery: Surgery,
         imageData: Data,
         angle: String,
         notes: String?,
-        surgeryDate: Date  // ← 手術日を必須パラメータに
+        surgeryDate: Date,
+        bodyPart: String?  // ← 新規追加: 部位情報（"胸" or "ドナー部位"）
     ) {
         let photo = Photo(context: context)
         photo.id = UUID()
@@ -84,6 +85,7 @@ class PhotoManager {
         photo.notes = notes
         photo.uploadDate = Date()
         photo.surgery = surgery
+        photo.bodypart = bodyPart  // ← 新規追加: 部位情報を保存
         
         // EXIF日付を抽出
         if let exifDate = extractEXIFDate(from: imageData) {
@@ -96,11 +98,11 @@ class PhotoManager {
             // 時期を推定 (Day XX形式対応)
             photo.timing = estimateTiming(from: daysAfter)
             
-            print("📅 写真保存: EXIF日付=\(exifDate), 手術日=\(surgeryDate), 経過日数=\(daysAfter), 時期=\(photo.timing ?? "nil")")
+            print("📅 写真保存: EXIF日付=\(exifDate), 手術日=\(surgeryDate), 経過日数=\(daysAfter), 時期=\(photo.timing ?? "nil"), 部位=\(bodyPart ?? "未設定")")
         } else {
             // EXIF日付がない場合は術前として扱う
             photo.timing = "術前"
-            print("⚠️ EXIF日付なし → 術前として保存")
+            print("⚠️ EXIF日付なし → 術前として保存 / 部位=\(bodyPart ?? "未設定")")
         }
         
         // サムネイル生成
@@ -110,7 +112,7 @@ class PhotoManager {
         
         do {
             try context.save()
-            print("✅ 写真保存成功: \(photo.timing ?? "nil") / \(angle)")
+            print("✅ 写真保存成功: \(photo.timing ?? "nil") / \(angle) / \(bodyPart ?? "未設定")")
         } catch {
             print("❌ 写真保存失敗: \(error)")
         }

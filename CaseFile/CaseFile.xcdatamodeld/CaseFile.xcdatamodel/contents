@@ -108,6 +108,7 @@
     </entity>
     <entity name="Photo" representedClassName="Photo" syncable="YES" codeGenerationType="class">
         <attribute name="angle" attributeType="String"/>
+        <attribute name="bodypart" optional="YES" attributeType="String"/>
         <attribute name="daysAfterSurgery" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="NO"/>
         <attribute name="exifDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
