@@ -1,3 +1,10 @@
+//
+//  PhotoManagementView.swift
+//  CaseFile
+//
+//  写真管理ビュー - 部位別フィルター対応版
+//
+
 import SwiftUI
 import CoreData
 
@@ -14,10 +21,54 @@ struct PhotoManagementView: View {
     @State private var photoToDelete: Photo? = nil
     @State private var displayMode: DisplayMode = .byTiming
     @State private var showComparisonView = false
+    @State private var bodyPartFilter: BodyPartFilter = .all  // ✅ 追加: 部位フィルター
+    
+    // ✅ 追加: 部位フィルター
+    enum BodyPartFilter: String, CaseIterable, Identifiable {
+        case all = "すべて"
+        case chest = "胸"
+        case donor = "ドナー部位"
+        case unspecified = "未分類"
+        
+        var id: String { rawValue }
+    }
     
     enum DisplayMode {
         case byTiming  // 時期別表示
         case byAngle   // 角度別表示
+    }
+    
+    // ✅ 追加: 脂肪注入かどうかを判定
+    private var isFatGraft: Bool {
+        // procedureフィールドをチェック
+        if let procedure = surgery.procedure?.lowercased(),
+           procedure.contains("脂肪注入") || procedure.contains("fat") || procedure.contains("graft") {
+            return true
+        }
+        
+        // surgeryTypeフィールドもチェック
+        if let surgeryType = surgery.surgeryType?.lowercased(),
+           surgeryType.contains("脂肪注入") || surgeryType.contains("fat") {
+            return true
+        }
+        
+        return false
+    }
+    
+    // ✅ 追加: 部位でフィルタリングされた写真
+    private var filteredPhotos: [Photo] {
+        let allPhotos = Array(photos)
+        
+        switch bodyPartFilter {
+        case .all:
+            return allPhotos
+        case .chest:
+            return allPhotos.filter { $0.bodypart == "胸" }
+        case .donor:
+            return allPhotos.filter { $0.bodypart == "ドナー部位" }
+        case .unspecified:
+            return allPhotos.filter { $0.bodypart == nil || $0.bodypart?.isEmpty == true }
+        }
     }
     
     init(surgery: Surgery) {
@@ -42,6 +93,17 @@ struct PhotoManagementView: View {
                 
                 Spacer()
                 
+                // ✅ 追加: 部位フィルター（脂肪注入のみ表示）
+                if isFatGraft {
+                    Picker("部位", selection: $bodyPartFilter) {
+                        ForEach(BodyPartFilter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 300)
+                }
+                
                 // Before/After 比較ボタン
                 Button {
                     showComparisonView = true
@@ -49,7 +111,7 @@ struct PhotoManagementView: View {
                     Label("Before/After", systemImage: "arrow.left.and.right")
                 }
                 .buttonStyle(.bordered)
-                .disabled(photos.isEmpty)
+                .disabled(filteredPhotos.isEmpty)
                 
                 // 表示モード切り替え
                 Picker("表示モード", selection: $displayMode) {
@@ -70,14 +132,14 @@ struct PhotoManagementView: View {
             
             Divider()
             
-            if photos.isEmpty {
+            if filteredPhotos.isEmpty {
                 // 写真がない場合
                 VStack(spacing: 20) {
                     Image(systemName: "photo.stack")
                         .font(.system(size: 60))
                         .foregroundColor(.gray)
                     
-                    Text("写真がまだありません")
+                    Text(bodyPartFilter == .all ? "写真がまだありません" : "\(bodyPartFilter.rawValue)の写真がありません")
                         .font(.headline)
                         .foregroundColor(.secondary)
                     
@@ -102,10 +164,14 @@ struct PhotoManagementView: View {
             PhotoUploadView(surgery: surgery)
         }
         .sheet(isPresented: $showPhotoViewer) {
-            PhotoViewerView(photos: Array(photos), initialIndex: selectedPhotoIndex)
+            PhotoViewerView(photos: filteredPhotos, initialIndex: selectedPhotoIndex)
         }
         .sheet(isPresented: $showComparisonView) {
-            BeforeAfterComparisonView(photos: Array(photos))
+            BeforeAfterComparisonView(
+                photos: filteredPhotos,
+                isFatGraft: isFatGraft,
+                initialBodyPartFilter: bodyPartFilter
+            )
         }
         .alert("写真を削除", isPresented: $showDeleteAlert) {
             Button("キャンセル", role: .cancel) {}
@@ -147,10 +213,13 @@ struct PhotoManagementView: View {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 10) {
                                     ForEach(anglePhotos) { photo in
-                                        PhotoThumbnail(photo: photo)
-                                            .onTapGesture {
-                                                openPhotoViewer(photo: photo)
-                                            }
+                                        PhotoThumbnailWithBodyPart(
+                                            photo: photo,
+                                            showBodyPart: isFatGraft && bodyPartFilter == .all
+                                        )
+                                        .onTapGesture {
+                                            openPhotoViewer(photo: photo)
+                                        }
                                     }
                                 }
                                 .padding(.horizontal)
@@ -186,7 +255,10 @@ struct PhotoManagementView: View {
                         HStack(spacing: 10) {
                             ForEach(photos.sorted(by: { timingOrder($0.timing ?? "") < timingOrder($1.timing ?? "") })) { photo in
                                 VStack {
-                                    PhotoThumbnail(photo: photo)
+                                    PhotoThumbnailWithBodyPart(
+                                        photo: photo,
+                                        showBodyPart: isFatGraft && bodyPartFilter == .all
+                                    )
                                     Text(photo.timing ?? "")
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
@@ -208,13 +280,13 @@ struct PhotoManagementView: View {
     // MARK: - Helper Functions
     
     private var groupedByTiming: [String: [Photo]] {
-        Dictionary(grouping: photos) { photo in
+        Dictionary(grouping: filteredPhotos) { photo in
             photo.timing ?? "その他"
         }
     }
     
     private var groupedByAngle: [String: [Photo]] {
-        Dictionary(grouping: photos) { photo in
+        Dictionary(grouping: filteredPhotos) { photo in
             photo.angle ?? "その他"
         }
     }
@@ -270,7 +342,7 @@ struct PhotoManagementView: View {
     }
     
     private func openPhotoViewer(photo: Photo) {
-        if let index = photos.firstIndex(of: photo) {
+        if let index = filteredPhotos.firstIndex(of: photo) {
             selectedPhotoIndex = index
             showPhotoViewer = true
         }
@@ -281,34 +353,71 @@ struct PhotoManagementView: View {
     }
 }
 
-// MARK: - PhotoThumbnail
+// MARK: - PhotoThumbnailWithBodyPart (部位バッジ付き)
+
+struct PhotoThumbnailWithBodyPart: View {
+    let photo: Photo
+    let showBodyPart: Bool
+    
+    var body: some View {
+        VStack {
+            ZStack(alignment: .topTrailing) {
+                // サムネイル画像
+                if let thumbnailData = photo.thumbnail,
+                   let nsImage = NSImage(data: thumbnailData),
+                   let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                    Image(decorative: cgImage, scale: 1.0)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 120, height: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 120, height: 120)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundColor(.gray)
+                        )
+                }
+                
+                // ✅ 部位バッジ（すべて表示時のみ）
+                if showBodyPart, let bodyPart = photo.bodypart, !bodyPart.isEmpty {
+                    Text(bodyPart)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(bodyPartColor(bodyPart))
+                        .cornerRadius(4)
+                        .padding(4)
+                }
+            }
+        }
+    }
+    
+    private func bodyPartColor(_ bodyPart: String) -> Color {
+        switch bodyPart {
+        case "胸":
+            return .pink
+        case "ドナー部位":
+            return .orange
+        default:
+            return .gray
+        }
+    }
+}
+
+// MARK: - PhotoThumbnail (従来版・互換性のため残す)
 
 struct PhotoThumbnail: View {
     let photo: Photo
     
     var body: some View {
-        VStack {
-            if let thumbnailData = photo.thumbnail,
-               let nsImage = NSImage(data: thumbnailData),
-               let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                Image(decorative: cgImage, scale: 1.0)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(width: 120, height: 120)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .foregroundColor(.gray)
-                    )
-            }
-        }
+        PhotoThumbnailWithBodyPart(photo: photo, showBodyPart: false)
     }
 }
